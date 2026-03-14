@@ -64,9 +64,6 @@ cp /installer/scaffold/.gitignore                          /app/.gitignore
 mkdir -p /app/bin
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
 
-# Create app/ directory — bind-mounted to /var/www/html inside containers
-mkdir -p /app/app
-
 success "Scaffold files written."
 
 # ── 4. Generate secrets ──────────────────────────────────────────────────────
@@ -100,8 +97,7 @@ if [ "$_uid" -ne 0 ]; then
         /app/.env.example \
         /app/.env \
         /app/.gitignore \
-        /app/bin/semitexa \
-        /app/app
+        /app/bin/semitexa
 fi
 
 success "File ownership set to ${_uid}:${_gid}."
