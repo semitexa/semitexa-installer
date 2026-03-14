@@ -87,20 +87,25 @@ chmod +x /app/bin/semitexa
 
 # Fix ownership to match the host user who owns /app.
 #
-# We read the UID/GID of the /app mount point itself and apply them to every
-# file we created.  The guard "_uid != 0" was intentionally removed:
+# Detection order:
+#   1. INSTALL_UID / INSTALL_GID env vars (explicit override)
+#   2. stat /app   — works for a freshly created, user-owned directory
+#   3. stat /app/.. — fallback when /app itself is root-owned (e.g. from a
+#      previous installer run that had this same bug)
 #
-#   • Standard Docker (rootful): stat returns the real host UID (e.g. 1000)
-#     → chown 1000:1000 fixes root-owned files.  ✓
+#   When the result is still 0 (rootless Docker — container UID 0 IS the
+#   host user) chown 0:0 is a no-op and files are already correctly owned.
 #
-#   • Rootless Docker / Docker via snap: the container's UID 0 IS the host
-#     user, so stat returns 0 for /app.  chown 0:0 is a no-op from the host's
-#     perspective — files are already owned by the correct user.  ✓
-#
-#   • Genuinely root-owned /app: stat returns 0, chown 0:0 is a no-op.  ✓
-#
-_uid="$(stat -c '%u' /app 2>/dev/null || echo 0)"
-_gid="$(stat -c '%g' /app 2>/dev/null || echo 0)"
+_uid="${INSTALL_UID:-$(stat -c '%u' /app 2>/dev/null || echo 0)}"
+_gid="${INSTALL_GID:-$(stat -c '%g' /app 2>/dev/null || echo 0)}"
+
+if [ "$_uid" -eq 0 ] && [ -z "${INSTALL_UID:-}" ]; then
+    _parent_uid="$(stat -c '%u' /app/.. 2>/dev/null || echo 0)"
+    if [ "$_parent_uid" -ne 0 ]; then
+        _uid="$_parent_uid"
+        _gid="$(stat -c '%g' /app/.. 2>/dev/null || echo 0)"
+    fi
+fi
 
 chown "${_uid}:${_gid}" \
     /app/bin \
