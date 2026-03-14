@@ -22,15 +22,15 @@ services:
     env_file: .env
     volumes:
       - app_code:/var/www/html
-    command: >
-      sh -c "
+    command:
+      - sh
+      - -c
+      - |
         if [ ! -f /var/www/html/vendor/autoload.php ]; then
-          composer create-project semitexa/ultimate /tmp/semitexa
-            --no-dev --no-interaction &&
+          composer create-project semitexa/ultimate /tmp/semitexa --no-dev --no-interaction &&
           cp -a /tmp/semitexa/. /var/www/html/ &&
-          rm -rf /tmp/semitexa;
+          rm -rf /tmp/semitexa
         fi
-      "
     depends_on:
       db:
         condition: service_healthy
