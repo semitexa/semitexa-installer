@@ -1,12 +1,187 @@
 #!/bin/sh
-# Semitexa CLI proxy — routes host commands into the cli container.
-# Usage: ./bin/semitexa <command> [arguments...]
+# Semitexa CLI — host entry point.
+#
+# DNS commands (dns:add / dns:remove / dns:list / dns:start / dns:stop) are
+# handled here on the host because they need access to systemd-resolved.
+#
+# All other commands are proxied into the cli container.
 set -e
 
 cd "$(dirname "$0")/.."
+PROJECT_ROOT="$(pwd)"
+DNS_DIR="$PROJECT_ROOT/var/dns"
+DNS_CONF="$DNS_DIR/dnsmasq.conf"
+DNS_DOMAINS="$DNS_DIR/domains.conf"
+DNS_COMPOSE="$PROJECT_ROOT/docker-compose.dns.yml"
+RESOLVED_DROPIN="/etc/systemd/resolved.conf.d/semitexa.conf"
 
-if [ -t 0 ]; then
-    exec docker compose run --rm cli "$@"
+# ── Colour helpers ────────────────────────────────────────────────────────────
+if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
+    C_RESET="$(tput sgr0 2>/dev/null || true)"
+    C_GREEN="$(tput setaf 2 2>/dev/null || true)"
+    C_YELLOW="$(tput setaf 3 2>/dev/null || true)"
+    C_RED="$(tput setaf 1 2>/dev/null || true)"
+    C_CYAN="$(tput setaf 6 2>/dev/null || true)"
+    C_BOLD="$(tput bold 2>/dev/null || true)"
 else
-    exec docker compose run --rm -T cli "$@"
+    C_RESET="" C_GREEN="" C_YELLOW="" C_RED="" C_CYAN="" C_BOLD=""
 fi
+
+info()    { printf "%s[INFO]%s  %s\n"  "$C_CYAN"   "$C_RESET" "$*"; }
+success() { printf "%s[OK]%s    %s\n"  "$C_GREEN"  "$C_RESET" "$*"; }
+warn()    { printf "%s[WARN]%s  %s\n"  "$C_YELLOW" "$C_RESET" "$*" >&2; }
+error()   { printf "%s[ERROR]%s %s\n"  "$C_RED"    "$C_RESET" "$*" >&2; }
+
+# ── DNS helpers ───────────────────────────────────────────────────────────────
+dns_ensure_dir() { mkdir -p "$DNS_DIR"; }
+
+dns_ensure_config() {
+    dns_ensure_dir
+    [ -f "$DNS_CONF" ] || cat > "$DNS_CONF" <<'EOF'
+port=53
+no-resolv
+no-daemon
+log-queries
+conf-file=/etc/dnsmasq.d/domains.conf
+EOF
+    [ -f "$DNS_DOMAINS" ] || printf "# Semitexa local domains\n# Format: address=/domain.test/127.0.0.1\n" > "$DNS_DOMAINS"
+}
+
+dns_collect_tlds() {
+    [ -f "$DNS_DOMAINS" ] || { echo "test"; return; }
+    _tlds=""
+    while IFS= read -r _line; do
+        case "$_line" in
+            address=/*)
+                _tld="$(echo "$_line" | sed 's|address=/[^/]*/||' | sed 's|.*\.||')"
+                case "$_tlds" in *"$_tld"*) ;; *) _tlds="$_tlds $_tld" ;; esac
+                ;;
+        esac
+    done < "$DNS_DOMAINS"
+    echo "${_tlds# }"
+}
+
+dns_bind_resolver() {
+    if ! command -v systemctl >/dev/null 2>&1 || ! systemctl is-active --quiet systemd-resolved; then
+        warn "systemd-resolved not active — skipping DNS binding."
+        warn "Add domains to /etc/hosts manually if needed."
+        return
+    fi
+    _tlds="$(dns_collect_tlds)"
+    _domains=""
+    for _tld in $_tlds; do _domains="$_domains ~$_tld"; done
+    _domains="${_domains# }"
+    _desired="$(printf '[Resolve]\nDNS=127.0.0.1:5553\nDomains=%s\n' "$_domains")"
+    if [ -f "$RESOLVED_DROPIN" ] && [ "$(cat "$RESOLVED_DROPIN")" = "$_desired" ]; then
+        success "DNS routing already configured for [$_domains]"; return
+    fi
+    info "Configuring systemd-resolved for [$_domains] → 127.0.0.1:5553"
+    sudo mkdir -p /etc/systemd/resolved.conf.d/
+    printf '%s\n' "$_desired" | sudo tee "$RESOLVED_DROPIN" >/dev/null
+    sudo systemctl restart systemd-resolved
+    success "systemd-resolved routes [$_domains] → dnsmasq"
+}
+
+dns_unbind_resolver() {
+    [ -f "$RESOLVED_DROPIN" ] || return
+    info "Removing DNS routing drop-in..."
+    sudo rm -f "$RESOLVED_DROPIN"
+    sudo systemctl restart systemd-resolved
+    success "DNS routing reverted."
+}
+
+# ── DNS commands ──────────────────────────────────────────────────────────────
+cmd_dns_add() {
+    _domain="${1:-}" _ip="${2:-127.0.0.1}"
+    [ -n "$_domain" ] || { error "Usage: bin/semitexa dns:add <domain> [ip]"; exit 1; }
+    dns_ensure_config
+    if grep -q "^address=/${_domain}/" "$DNS_DOMAINS" 2>/dev/null; then
+        _esc="$(echo "$_domain" | sed 's/[.]/\\./g')"
+        sed -i.bak "s|^address=/${_esc}/.*|address=/${_domain}/${_ip}|" "$DNS_DOMAINS"
+        rm -f "${DNS_DOMAINS}.bak"
+        success "Updated: $_domain → $_ip"
+    else
+        echo "address=/${_domain}/${_ip}" >> "$DNS_DOMAINS"
+        success "Added: $_domain → $_ip"
+    fi
+    _st="$(docker compose -f docker-compose.yml -f docker-compose.dns.yml ps --format '{{.State}}' dns 2>/dev/null || true)"
+    case "$_st" in *running*)
+        docker compose -f docker-compose.yml -f docker-compose.dns.yml restart dns proxy
+        success "DNS restarted."
+    ;; esac
+}
+
+cmd_dns_remove() {
+    _domain="${1:-}"
+    [ -n "$_domain" ] || { error "Usage: bin/semitexa dns:remove <domain>"; exit 1; }
+    dns_ensure_config
+    grep -q "^address=/${_domain}/" "$DNS_DOMAINS" 2>/dev/null || { warn "Domain '$_domain' not found."; exit 0; }
+    _esc="$(echo "$_domain" | sed 's/[.]/\\./g')"
+    sed -i.bak "/^address=\/${_esc}\//d" "$DNS_DOMAINS"; rm -f "${DNS_DOMAINS}.bak"
+    success "Removed: $_domain"
+    _st="$(docker compose -f docker-compose.yml -f docker-compose.dns.yml ps --format '{{.State}}' dns 2>/dev/null || true)"
+    case "$_st" in *running*)
+        docker compose -f docker-compose.yml -f docker-compose.dns.yml restart dns proxy
+    ;; esac
+}
+
+cmd_dns_list() {
+    printf "\n%s%sSemitexa — Local DNS Domains%s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    dns_ensure_config
+    _count=0
+    while IFS= read -r _line; do
+        case "$_line" in
+            address=/*)
+                _dom="$(echo "$_line" | sed 's|address=/\([^/]*\)/.*|\1|')"
+                _ip="$(echo "$_line" | sed 's|address=/[^/]*/||')"
+                printf "  %s%-30s%s → %s\n" "$C_GREEN" "$_dom" "$C_RESET" "$_ip"
+                _count=$((_count + 1))
+                ;;
+        esac
+    done < "$DNS_DOMAINS"
+    printf "\n"
+    [ "$_count" -eq 0 ] && info "No domains configured. Run: bin/semitexa dns:add myapp.test" || info "$_count domain(s) configured."
+    printf "\n"
+}
+
+cmd_dns_start() {
+    dns_ensure_config
+    docker compose -f docker-compose.yml -f docker-compose.dns.yml up -d dns proxy
+    dns_bind_resolver
+    success "DNS (5553) and Proxy (80) started."
+}
+
+cmd_dns_stop() {
+    [ -f "$DNS_COMPOSE" ] || { info "No DNS configured."; exit 0; }
+    dns_unbind_resolver
+    docker compose -f docker-compose.yml -f docker-compose.dns.yml stop dns proxy
+    success "DNS and Proxy stopped."
+}
+
+cmd_dns_restart() {
+    [ -f "$DNS_COMPOSE" ] || { info "No DNS configured."; exit 0; }
+    docker compose -f docker-compose.yml -f docker-compose.dns.yml restart dns proxy
+    dns_bind_resolver
+    success "DNS and Proxy restarted."
+}
+
+# ── Command dispatch ──────────────────────────────────────────────────────────
+COMMAND="${1:-}"
+shift || true
+
+case "$COMMAND" in
+    dns:add)     cmd_dns_add "$@" ;;
+    dns:remove)  cmd_dns_remove "$@" ;;
+    dns:list)    cmd_dns_list ;;
+    dns:start)   cmd_dns_start ;;
+    dns:stop)    cmd_dns_stop ;;
+    dns:restart) cmd_dns_restart ;;
+    *)
+        # All other commands → cli container
+        if [ -t 0 ]; then
+            exec docker compose run --rm cli "$COMMAND" "$@"
+        else
+            exec docker compose run --rm -T cli "$COMMAND" "$@"
+        fi
+        ;;
+esac
