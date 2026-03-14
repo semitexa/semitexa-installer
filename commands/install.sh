@@ -64,6 +64,9 @@ cp /installer/scaffold/.gitignore                          /app/.gitignore
 mkdir -p /app/bin
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
 
+# Create app/ directory — bind-mounted to /var/www/html inside containers
+mkdir -p /app/app
+
 success "Scaffold files written."
 
 # ── 4. Generate secrets ──────────────────────────────────────────────────────
@@ -90,13 +93,15 @@ _uid="$(stat -c '%u' /app 2>/dev/null || echo 0)"
 _gid="$(stat -c '%g' /app 2>/dev/null || echo 0)"
 
 if [ "$_uid" -ne 0 ]; then
-    chown -R "${_uid}:${_gid}" /app/Dockerfile \
+    chown -R "${_uid}:${_gid}" \
+        /app/Dockerfile \
         /app/docker-compose.yml \
         /app/docker-compose.override.yml.example \
         /app/.env.example \
         /app/.env \
         /app/.gitignore \
-        /app/bin/semitexa
+        /app/bin/semitexa \
+        /app/app
 fi
 
 success "File ownership set to ${_uid}:${_gid}."
