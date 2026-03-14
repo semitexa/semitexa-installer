@@ -1,0 +1,83 @@
+services:
+  app:
+    build: .
+    container_name: semitexa_app_1
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - app_code:/var/www/html
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+
+  setup:
+    build: .
+    container_name: semitexa_setup_1
+    env_file: .env
+    volumes:
+      - app_code:/var/www/html
+    command: >
+      sh -c "
+        if [ ! -f /var/www/html/vendor/autoload.php ]; then
+          composer create-project semitexa/ultimate /tmp/semitexa
+            --no-dev --no-interaction &&
+          cp -a /tmp/semitexa/. /var/www/html/ &&
+          rm -rf /tmp/semitexa;
+        fi
+      "
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  cli:
+    build: .
+    container_name: semitexa_cli_1
+    env_file: .env
+    volumes:
+      - app_code:/var/www/html
+    working_dir: /var/www/html
+    command: ["sleep", "infinity"]
+    profiles: ["cli"]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  db:
+    image: mysql:8.0
+    container_name: semitexa_db_1
+    env_file: .env
+    environment:
+      MYSQL_DATABASE: "${DB_DATABASE:-semitexa}"
+      MYSQL_USER: "${DB_USERNAME:-semitexa}"
+      MYSQL_PASSWORD: "${DB_PASSWORD}"
+      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD}"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: semitexa_redis_1
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  app_code:
+  db_data:

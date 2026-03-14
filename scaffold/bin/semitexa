@@ -1,0 +1,12 @@
+#!/bin/sh
+# Semitexa CLI proxy — routes host commands into the cli container.
+# Usage: ./bin/semitexa <command> [arguments...]
+set -e
+
+cd "$(dirname "$0")/.."
+
+if [ -t 0 ]; then
+    exec docker compose run --rm cli "$@"
+else
+    exec docker compose run --rm -T cli "$@"
+fi
