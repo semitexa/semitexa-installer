@@ -85,20 +85,32 @@ success ".env generated with fresh secrets."
 # ── 6. Fix permissions & ownership ──────────────────────────────────────────
 chmod +x /app/bin/semitexa
 
-# Fix ownership to match the host user who owns /app
+# Fix ownership to match the host user who owns /app.
+#
+# We read the UID/GID of the /app mount point itself and apply them to every
+# file we created.  The guard "_uid != 0" was intentionally removed:
+#
+#   • Standard Docker (rootful): stat returns the real host UID (e.g. 1000)
+#     → chown 1000:1000 fixes root-owned files.  ✓
+#
+#   • Rootless Docker / Docker via snap: the container's UID 0 IS the host
+#     user, so stat returns 0 for /app.  chown 0:0 is a no-op from the host's
+#     perspective — files are already owned by the correct user.  ✓
+#
+#   • Genuinely root-owned /app: stat returns 0, chown 0:0 is a no-op.  ✓
+#
 _uid="$(stat -c '%u' /app 2>/dev/null || echo 0)"
 _gid="$(stat -c '%g' /app 2>/dev/null || echo 0)"
 
-if [ "$_uid" -ne 0 ]; then
-    chown -R "${_uid}:${_gid}" \
-        /app/Dockerfile \
-        /app/docker-compose.yml \
-        /app/docker-compose.override.yml.example \
-        /app/.env.example \
-        /app/.env \
-        /app/.gitignore \
-        /app/bin/semitexa
-fi
+chown "${_uid}:${_gid}" \
+    /app/bin \
+    /app/Dockerfile \
+    /app/docker-compose.yml \
+    /app/docker-compose.override.yml.example \
+    /app/.env.example \
+    /app/.env \
+    /app/.gitignore \
+    /app/bin/semitexa
 
 success "File ownership set to ${_uid}:${_gid}."
 
