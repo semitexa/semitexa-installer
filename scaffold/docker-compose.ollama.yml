@@ -1,0 +1,48 @@
+# Optional: Ollama local LLM runtime. Used automatically when LLM_PROVIDER=ollama is set in .env.
+# Start: docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+# Or: bin/semitexa server:start (uses this file automatically when LLM_PROVIDER=ollama is set).
+#
+# After first start, pull a model inside the container:
+#   docker compose exec ollama ollama pull gemma3:4b
+#
+# Available models (set LLM_MODEL in .env):
+#   gemma3:4b      ~3 GB  — fast, good quality, recommended for weak VPS
+#   gemma3:12b     ~8 GB  — better quality, needs 16 GB RAM
+#   llama3.2:3b    ~2 GB  — very fast, lower quality
+#   llama3.2:8b    ~5 GB  — good balance
+#   mistral:7b     ~4 GB  — strong general-purpose model
+#   phi4:14b       ~9 GB  — high quality, needs 16 GB RAM
+#
+# GPU acceleration (optional): copy to docker-compose.override.yml and uncomment:
+#   services:
+#     ollama:
+#       deploy:
+#         resources:
+#           reservations:
+#             devices:
+#               - driver: nvidia
+#                 count: all
+#                 capabilities: [gpu]
+
+services:
+  app:
+    environment:
+      LLM_BASE_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  ollama_data:
