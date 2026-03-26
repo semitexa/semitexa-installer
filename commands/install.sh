@@ -57,6 +57,7 @@ info "Scaffolding Semitexa Ultimate project..."
 
 cp /installer/scaffold/Dockerfile                          /app/Dockerfile
 cp /installer/scaffold/docker-compose.yml                  /app/docker-compose.yml
+cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.example                        /app/.env.example
 cp /installer/scaffold/.gitignore                          /app/.gitignore
@@ -111,6 +112,7 @@ chown "${_uid}:${_gid}" \
     /app/bin \
     /app/Dockerfile \
     /app/docker-compose.yml \
+    /app/docker-compose.ollama.yml \
     /app/docker-compose.override.yml.example \
     /app/.env.example \
     /app/.env \
@@ -143,5 +145,12 @@ printf "       ${C_CYAN}http://localhost:8080${C_RESET}\n\n"
 
 printf "For a shell inside the container:\n"
 printf "       ${C_CYAN}./bin/semitexa sh${C_RESET}\n\n"
+
+printf "AI assistant (optional):\n\n"
+printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env, then:\n"
+printf "       ${C_CYAN}docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d${C_RESET}\n"
+printf "       ${C_CYAN}docker compose exec ollama ollama pull gemma3:4b${C_RESET}\n"
+printf "       ${C_CYAN}./bin/semitexa php bin/semitexa ai${C_RESET}\n\n"
+printf "  The standard ${C_CYAN}bin/semitexa server:start${C_RESET} flow does not enable Ollama automatically.\n\n"
 
 printf "Documentation: ${C_CYAN}https://semitexa.dev/docs${C_RESET}\n\n"
