@@ -147,10 +147,10 @@ printf "For a shell inside the container:\n"
 printf "       ${C_CYAN}./bin/semitexa sh${C_RESET}\n\n"
 
 printf "AI assistant (optional):\n\n"
-printf "  Enable Ollama LLM by uncommenting LLM_PROVIDER in .env, then:\n"
+printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env, then:\n"
 printf "       ${C_CYAN}docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d${C_RESET}\n"
 printf "       ${C_CYAN}docker compose exec ollama ollama pull gemma3:4b${C_RESET}\n"
 printf "       ${C_CYAN}./bin/semitexa php bin/semitexa ai${C_RESET}\n\n"
-printf "  Or add LLM_PROVIDER=ollama to .env and run bin/semitexa server:start\n\n"
+printf "  The standard ${C_CYAN}bin/semitexa server:start${C_RESET} flow does not enable Ollama automatically.\n\n"
 
 printf "Documentation: ${C_CYAN}https://semitexa.dev/docs${C_RESET}\n\n"

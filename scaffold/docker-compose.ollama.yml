@@ -1,6 +1,5 @@
-# Optional: Ollama local LLM runtime. Used automatically when LLM_PROVIDER=ollama is set in .env.
+# Optional: Ollama local LLM runtime. Enable it explicitly with this compose overlay after setting LLM_PROVIDER=ollama in .env.
 # Start: docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
-# Or: bin/semitexa server:start (uses this file automatically when LLM_PROVIDER=ollama is set).
 #
 # After first start, pull a model inside the container:
 #   docker compose exec ollama ollama pull gemma3:4b
@@ -33,7 +32,7 @@ services:
         condition: service_healthy
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.5.7
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
