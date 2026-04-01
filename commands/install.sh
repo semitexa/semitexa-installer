@@ -63,7 +63,9 @@ cp /installer/scaffold/.env.example                        /app/.env.example
 cp /installer/scaffold/.gitignore                          /app/.gitignore
 
 mkdir -p /app/bin
+mkdir -p /app/scripts
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
+cp /installer/scaffold/scripts/bootstrap-project.sh /app/scripts/bootstrap-project.sh
 
 success "Scaffold files written."
 
@@ -84,7 +86,7 @@ sed \
 success ".env generated with fresh secrets."
 
 # ── 6. Fix permissions & ownership ──────────────────────────────────────────
-chmod +x /app/bin/semitexa
+chmod +x /app/bin/semitexa /app/scripts/bootstrap-project.sh
 
 # Fix ownership to match the host user who owns /app.
 #
@@ -117,7 +119,9 @@ chown "${_uid}:${_gid}" \
     /app/.env.example \
     /app/.env \
     /app/.gitignore \
-    /app/bin/semitexa
+    /app/bin/semitexa \
+    /app/scripts \
+    /app/scripts/bootstrap-project.sh
 
 success "File ownership set to ${_uid}:${_gid}."
 
