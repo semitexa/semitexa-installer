@@ -5,6 +5,13 @@ COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 RUN apk add --no-cache unzip \
     && docker-php-ext-install pdo pdo_mysql
 
+RUN apk add --no-cache imagemagick-dev \
+    && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
+    && pecl install imagick \
+    && docker-php-ext-enable imagick \
+    && apk del .build-deps \
+    && rm -rf /tmp/pear
+
 WORKDIR /var/www/html
 
 CMD ["php", "server.php"]
