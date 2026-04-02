@@ -146,7 +146,8 @@ composer install \
     --working-dir="$TEMP_DIR" \
     --no-dev \
     --no-interaction \
-    --prefer-dist || fail "Composer install failed."
+    --prefer-dist \
+    --optimize-autoloader || fail "Composer install failed."
 
 step "4" "sync project files"
 _host_uid="$(stat -c '%u' "$TARGET_DIR")"
