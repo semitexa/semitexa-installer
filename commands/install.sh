@@ -111,6 +111,7 @@ if [ "$_uid" -eq 0 ] && [ -z "${INSTALL_UID:-}" ]; then
 fi
 
 chown "${_uid}:${_gid}" \
+    /app \
     /app/bin \
     /app/Dockerfile \
     /app/docker-compose.yml \
