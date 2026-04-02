@@ -149,9 +149,13 @@ composer install \
     --prefer-dist || fail "Composer install failed."
 
 step "4" "sync project files"
+_host_uid="$(stat -c '%u' "$TARGET_DIR")"
+_host_gid="$(stat -c '%g' "$TARGET_DIR")"
 backup_installer_owned_files
 cp -a "${TEMP_DIR}/." "${TARGET_DIR}/" || fail "Failed to copy generated project into bind mount."
 restore_installer_owned_files
+chown -R "${_host_uid}:${_host_gid}" "${TARGET_DIR}/" 2>/dev/null || true
+chmod +x "${TARGET_DIR}/bin/semitexa" 2>/dev/null || true
 
 step "5" "write success marker"
 mkdir -p "${TARGET_DIR}/var/install"
