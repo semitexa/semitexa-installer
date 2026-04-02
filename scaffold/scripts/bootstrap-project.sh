@@ -25,8 +25,11 @@ timestamp() {
 log_line() {
     _line="$1"
     printf "%s\n" "$_line"
-    mkdir -p "${TARGET_DIR}/var/log"
-    printf "%s\n" "$_line" >> "$LOG_PATH"
+
+    if [ -d "$TARGET_DIR" ] && [ -w "$TARGET_DIR" ]; then
+        mkdir -p "${TARGET_DIR}/var/log" 2>/dev/null || true
+        printf "%s\n" "$_line" >> "$LOG_PATH" 2>/dev/null || true
+    fi
 }
 
 info() {
@@ -104,8 +107,6 @@ restore_installer_owned_files() {
     done
 }
 
-info "Bootstrap entrypoint started."
-
 if [ ! -d "$TARGET_DIR" ]; then
     fail "Target directory '${TARGET_DIR}' does not exist."
 fi
@@ -113,6 +114,8 @@ fi
 if [ ! -w "$TARGET_DIR" ]; then
     fail "Target directory '${TARGET_DIR}' is not writable."
 fi
+
+info "Bootstrap entrypoint started."
 
 for _bin in composer php cp rm mkdir date; do
     require_bin "$_bin"
