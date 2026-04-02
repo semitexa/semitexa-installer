@@ -172,12 +172,30 @@ cmd_server_start() {
         exit 1
     fi
 
+    # _skip_dns=1 when port 5553 is already held by another Docker DNS container.
+    # In that case we start without docker-compose.dns.yml so the two projects
+    # share the already-running DNS service instead of fighting over the port.
+    _skip_dns=0
+
     _overlays="$(compose_args)"
     [ -n "$_overlays" ] && info "Compose files: $_overlays"
 
     # ── Pre-flight Checks (Proxy & DNS) ──────────────────────────────
     if [ -f "$PROJECT_ROOT/docker-compose.dns.yml" ]; then
-        if command -v ss >/dev/null 2>&1; then
+        # Port 5553 — DNS container. Check before port 80 (proxy) because if
+        # another project's DNS is already running we skip BOTH dns + proxy.
+        if ss -tlnp 2>/dev/null | grep -q ":5553"; then
+            _dns_holder="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+                | awk '/5553/{print $1}' | head -1)"
+            if [ -n "$_dns_holder" ]; then
+                info "DNS port 5553 is held by '$_dns_holder' — sharing that DNS service."
+                _skip_dns=1
+            else
+                warn "Port 5553 is in use by a non-Docker process. DNS container may fail to start."
+            fi
+        fi
+
+        if [ "$_skip_dns" -eq 0 ] && command -v ss >/dev/null 2>&1; then
             _port80_pid="$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/ {print $6}' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)"
             if [ -n "$_port80_pid" ]; then
                 _port80_proc="$(ps -p "$_port80_pid" -o comm= 2>/dev/null || echo "unknown")"
@@ -229,7 +247,20 @@ cmd_server_start() {
     fi
 
     info "Starting containers..."
-    run_compose up -d
+    if [ "$_skip_dns" -eq 1 ]; then
+        _compose_bin="$(compose_bin)"
+        _all_args="$(compose_args)"
+        if [ -n "$_all_args" ]; then
+            # Strip the DNS overlay so we don't fight over port 5553
+            _no_dns="$(printf '%s' "$_all_args" | sed 's/ -f [^ ]*docker-compose\.dns\.yml//g')"
+            # shellcheck disable=SC2086
+            $_compose_bin $_no_dns up -d --remove-orphans
+        else
+            $_compose_bin up -d --remove-orphans
+        fi
+    else
+        run_compose up -d --remove-orphans
+    fi
 
     _port="$(env_val SWOOLE_PORT 9502)"
     printf "\n"
