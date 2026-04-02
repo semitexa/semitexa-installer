@@ -108,6 +108,66 @@ compose_args() {
     fi
 }
 
+dns_find_port_holder() {
+    _port="${1:-5553}"
+
+    if command -v ss >/dev/null 2>&1; then
+        if ss -tulnp 2>/dev/null | grep -q ":${_port}"; then
+            docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+                | awk -v port=":${_port}" '$0 ~ port {print $1}' | head -1
+            return 0
+        fi
+        return 1
+    fi
+
+    if command -v lsof >/dev/null 2>&1; then
+        if lsof -nP -iTCP:"${_port}" -sTCP:LISTEN 2>/dev/null | grep -q . \
+            || lsof -nP -iUDP:"${_port}" 2>/dev/null | grep -q .; then
+            docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+                | awk -v port=":${_port}" '$0 ~ port {print $1}' | head -1
+            return 0
+        fi
+        return 1
+    fi
+
+    if command -v netstat >/dev/null 2>&1; then
+        if netstat -tuln 2>/dev/null | grep -q "[\.:]${_port}[[:space:]]"; then
+            docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+                | awk -v port=":${_port}" '$0 ~ port {print $1}' | head -1
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+dns_holder_is_project_owned() {
+    _holder="${1:-}"
+    [ -z "$_holder" ] && return 1
+
+    _working_dir="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$_holder" 2>/dev/null || true)"
+    [ "$_working_dir" = "$PROJECT_ROOT" ] && return 0
+
+    _config_files="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.config_files" }}' "$_holder" 2>/dev/null || true)"
+    printf '%s' "$_config_files" | grep -Fq "$PROJECT_ROOT/docker-compose.dns.yml" && return 0
+
+    _mounts="$(docker inspect -f '{{ range .Mounts }}{{ .Source }}{{ "\n" }}{{ end }}' "$_holder" 2>/dev/null || true)"
+    printf '%s\n' "$_mounts" | grep -Fxq "$PROJECT_ROOT/var/dns/dnsmasq.conf" && return 0
+    printf '%s\n' "$_mounts" | grep -Fxq "$PROJECT_ROOT/var/dns/domains.conf" && return 0
+
+    return 1
+}
+
+ensure_no_external_dns_dependency() {
+    _dns_holder="${1:-}"
+    if [ "${EXTERNAL_DNS_ACTIVE:-0}" -eq 1 ]; then
+        error "This project is currently sharing an external DNS service${_dns_holder:+ ('$_dns_holder')}."
+        error "Local dns:* commands are disabled because this project's domains.conf is not mounted into that container."
+        error "Start this project's own DNS stack first, or manage domains in the external Semitexa project."
+        exit 1
+    fi
+}
+
 run_compose() {
     _compose="$(compose_bin)"
     _overlays="$(compose_args)"
@@ -172,12 +232,36 @@ cmd_server_start() {
         exit 1
     fi
 
+    # _own_dns=1 when this project's DNS container already owns port 5553.
+    # _external_dns=1 when another Docker stack owns 5553, so we start app-only
+    # without mutating that foreign DNS/proxy configuration.
+    _own_dns=0
+    _external_dns=0
+    _dns_holder=""
+
     _overlays="$(compose_args)"
     [ -n "$_overlays" ] && info "Compose files: $_overlays"
 
     # ── Pre-flight Checks (Proxy & DNS) ──────────────────────────────
     if [ -f "$PROJECT_ROOT/docker-compose.dns.yml" ]; then
-        if command -v ss >/dev/null 2>&1; then
+        # Port 5553 — DNS container. Check before port 80 (proxy) because if
+        # another Semitexa project's DNS is already running we avoid the local
+        # DNS/proxy overlay instead of fighting over the same port.
+        if _dns_holder="$(dns_find_port_holder 5553)"; then
+            if [ -n "$_dns_holder" ]; then
+                if dns_holder_is_project_owned "$_dns_holder"; then
+                    info "DNS port 5553 is already held by this project's DNS container '$_dns_holder'."
+                    _own_dns=1
+                else
+                    info "DNS port 5553 is held by external container '$_dns_holder' — sharing that DNS service."
+                    _external_dns=1
+                fi
+            else
+                warn "Port 5553 is in use by a non-Docker process. DNS container may fail to start."
+            fi
+        fi
+
+        if [ "$_own_dns" -eq 0 ] && [ "$_external_dns" -eq 0 ] && command -v ss >/dev/null 2>&1; then
             _port80_pid="$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/ {print $6}' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)"
             if [ -n "$_port80_pid" ]; then
                 _port80_proc="$(ps -p "$_port80_pid" -o comm= 2>/dev/null || echo "unknown")"
@@ -229,7 +313,23 @@ cmd_server_start() {
     fi
 
     info "Starting containers..."
-    run_compose up -d
+    if [ "$_external_dns" -eq 1 ]; then
+        _compose_bin="$(compose_bin)"
+        _all_args="$(compose_args)"
+        if [ -n "$_all_args" ]; then
+            # Strip the DNS overlay so we don't fight over port 5553
+            _no_dns="$(printf '%s' "$_all_args" | sed 's/ -f [^ ]*docker-compose\.dns\.yml//g')"
+            # shellcheck disable=SC2086
+            $_compose_bin $_no_dns up -d --remove-orphans
+        else
+            $_compose_bin up -d --remove-orphans
+        fi
+    else
+        run_compose up -d --remove-orphans
+    fi
+
+    EXTERNAL_DNS_ACTIVE="$_external_dns"
+    export EXTERNAL_DNS_ACTIVE
 
     _port="$(env_val SWOOLE_PORT 9502)"
     printf "\n"
@@ -398,6 +498,13 @@ cmd_dns_add() {
         error "Usage: bin/semitexa dns:add <domain> [ip]"
         exit 1
     fi
+    _dns_holder="$(dns_find_port_holder 5553 || true)"
+    if [ -n "$_dns_holder" ] && ! dns_holder_is_project_owned "$_dns_holder"; then
+        EXTERNAL_DNS_ACTIVE=1
+    else
+        EXTERNAL_DNS_ACTIVE=0
+    fi
+    ensure_no_external_dns_dependency "$_dns_holder"
     dns_ensure_config
     dns_ensure_compose
 
@@ -419,6 +526,13 @@ cmd_dns_add() {
 cmd_dns_remove() {
     _domain="${1:-}"
     [ -z "$_domain" ] && { error "Usage: bin/semitexa dns:remove <domain>"; exit 1; }
+    _dns_holder="$(dns_find_port_holder 5553 || true)"
+    if [ -n "$_dns_holder" ] && ! dns_holder_is_project_owned "$_dns_holder"; then
+        EXTERNAL_DNS_ACTIVE=1
+    else
+        EXTERNAL_DNS_ACTIVE=0
+    fi
+    ensure_no_external_dns_dependency "$_dns_holder"
     dns_ensure_config
     if ! grep -q "^address=/${_domain}/" "$DNS_DOMAINS" 2>/dev/null; then
         warn "Domain '$_domain' not found."; exit 0
@@ -446,9 +560,46 @@ cmd_dns_list() {
     printf "\n"
 }
 
-cmd_dns_start() { dns_ensure_config; dns_ensure_compose; _compose="$(compose_bin)"; $_compose -f docker-compose.yml -f docker-compose.dns.yml up -d dns proxy; success "DNS (5553) and Proxy (80) started."; }
-cmd_dns_stop()  { [ ! -f "$DNS_COMPOSE" ] && { info "No DNS configured."; exit 0; }; _compose="$(compose_bin)"; $_compose -f docker-compose.yml -f docker-compose.dns.yml stop dns proxy; success "DNS and Proxy stopped."; }
-cmd_dns_restart() { [ ! -f "$DNS_COMPOSE" ] && { info "No DNS configured."; exit 0; }; _compose="$(compose_bin)"; $_compose -f docker-compose.yml -f docker-compose.dns.yml restart dns proxy; success "DNS and Proxy restarted."; }
+cmd_dns_start() {
+    _dns_holder="$(dns_find_port_holder 5553 || true)"
+    if [ -n "$_dns_holder" ] && ! dns_holder_is_project_owned "$_dns_holder"; then
+        EXTERNAL_DNS_ACTIVE=1
+    else
+        EXTERNAL_DNS_ACTIVE=0
+    fi
+    ensure_no_external_dns_dependency "$_dns_holder"
+    dns_ensure_config
+    dns_ensure_compose
+    _compose="$(compose_bin)"
+    $_compose -f docker-compose.yml -f docker-compose.dns.yml up -d dns proxy
+    success "DNS (5553) and Proxy (80) started."
+}
+cmd_dns_stop()  {
+    _dns_holder="$(dns_find_port_holder 5553 || true)"
+    if [ -n "$_dns_holder" ] && ! dns_holder_is_project_owned "$_dns_holder"; then
+        EXTERNAL_DNS_ACTIVE=1
+    else
+        EXTERNAL_DNS_ACTIVE=0
+    fi
+    ensure_no_external_dns_dependency "$_dns_holder"
+    [ ! -f "$DNS_COMPOSE" ] && { info "No DNS configured."; exit 0; }
+    _compose="$(compose_bin)"
+    $_compose -f docker-compose.yml -f docker-compose.dns.yml stop dns proxy
+    success "DNS and Proxy stopped."
+}
+cmd_dns_restart() {
+    _dns_holder="$(dns_find_port_holder 5553 || true)"
+    if [ -n "$_dns_holder" ] && ! dns_holder_is_project_owned "$_dns_holder"; then
+        EXTERNAL_DNS_ACTIVE=1
+    else
+        EXTERNAL_DNS_ACTIVE=0
+    fi
+    ensure_no_external_dns_dependency "$_dns_holder"
+    [ ! -f "$DNS_COMPOSE" ] && { info "No DNS configured."; exit 0; }
+    _compose="$(compose_bin)"
+    $_compose -f docker-compose.yml -f docker-compose.dns.yml restart dns proxy
+    success "DNS and Proxy restarted."
+}
 
 # ═══════════════════════════════════════════════════════════════════════
 cmd_list() {
