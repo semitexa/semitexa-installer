@@ -1,4 +1,4 @@
-# semitexa/installer
+# Semitexa Installer
 
 Docker-based project scaffolder that bootstraps a new Semitexa application with a single command.
 
