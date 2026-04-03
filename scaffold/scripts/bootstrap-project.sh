@@ -65,8 +65,9 @@ backup_installer_owned_files() {
     mkdir -p "$BACKUP_DIR/bin" "$BACKUP_DIR/scripts"
 
     for _file in \
+        ".env.default" \
+        ".env.local" \
         ".env" \
-        ".env.example" \
         ".gitignore" \
         "Dockerfile" \
         "docker-compose.yml" \
@@ -90,8 +91,9 @@ backup_installer_owned_files() {
 
 restore_installer_owned_files() {
     for _path in \
+        ".env.default" \
+        ".env.local" \
         ".env" \
-        ".env.example" \
         ".gitignore" \
         "Dockerfile" \
         "docker-compose.yml" \

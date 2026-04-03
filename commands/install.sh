@@ -59,7 +59,7 @@ cp /installer/scaffold/Dockerfile                          /app/Dockerfile
 cp /installer/scaffold/docker-compose.yml                  /app/docker-compose.yml
 cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
-cp /installer/scaffold/.env.example                        /app/.env.example
+cp /installer/scaffold/.env.default                        /app/.env.default
 cp /installer/scaffold/.gitignore                          /app/.gitignore
 
 mkdir -p /app/bin
@@ -68,22 +68,6 @@ cp /installer/scaffold/bin/semitexa /app/bin/semitexa
 cp /installer/scaffold/scripts/bootstrap-project.sh /app/scripts/bootstrap-project.sh
 
 success "Scaffold files written."
-
-# ── 4. Generate secrets ──────────────────────────────────────────────────────
-info "Generating secrets..."
-
-APP_KEY="$(php -r 'echo base64_encode(random_bytes(32));')"
-DB_PASSWORD="$(php -r 'echo bin2hex(random_bytes(16));')"
-DB_ROOT_PASSWORD="$(php -r 'echo bin2hex(random_bytes(16));')"
-
-# ── 5. Write .env from .env.example with secrets substituted ────────────────
-sed \
-    -e "s|APP_KEY=CHANGEME|APP_KEY=${APP_KEY}|" \
-    -e "s|DB_PASSWORD=CHANGEME|DB_PASSWORD=${DB_PASSWORD}|" \
-    -e "s|DB_ROOT_PASSWORD=CHANGEME|DB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}|" \
-    /installer/scaffold/.env.example > /app/.env
-
-success ".env generated with fresh secrets."
 
 # ── 6. Fix permissions & ownership ──────────────────────────────────────────
 chmod +x /app/bin/semitexa /app/scripts/bootstrap-project.sh
@@ -117,8 +101,7 @@ chown "${_uid}:${_gid}" \
     /app/docker-compose.yml \
     /app/docker-compose.ollama.yml \
     /app/docker-compose.override.yml.example \
-    /app/.env.example \
-    /app/.env \
+    /app/.env.default \
     /app/.gitignore \
     /app/bin/semitexa \
     /app/scripts \
@@ -152,7 +135,7 @@ printf "For a shell inside the container:\n"
 printf "       ${C_CYAN}./bin/semitexa sh${C_RESET}\n\n"
 
 printf "AI assistant (optional):\n\n"
-printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env, then:\n"
+printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env.local, then:\n"
 printf "       ${C_CYAN}docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d${C_RESET}\n"
 printf "       ${C_CYAN}docker compose exec ollama ollama pull gemma3:4b${C_RESET}\n"
 printf "       ${C_CYAN}./bin/semitexa php bin/semitexa ai${C_RESET}\n\n"
