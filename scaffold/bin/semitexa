@@ -434,18 +434,11 @@ router_compose() {
 }
 
 tty_available() {
-    : </dev/tty 2>/dev/null
+    [ -t 0 ] && [ -e /dev/tty ]
 }
 
 sudo_ready() {
     sudo -n true >/dev/null 2>&1
-}
-
-auto_fix_dns_enabled() {
-    case "${SEMITEXA_AUTO_FIX_DNS:-}" in
-        1|true|TRUE|yes|YES|on|ON) return 0 ;;
-        *) return 1 ;;
-    esac
 }
 
 router_configure_resolved_for_test() {
@@ -459,10 +452,10 @@ router_configure_resolved_for_test() {
         if tty_available; then
             printf "%s? Do you want to fix this automatically? (requires sudo) [Y/n]%s " "$C_YELLOW" "$C_RESET"
             read -r _ans </dev/tty
-        elif auto_fix_dns_enabled && sudo_ready; then
+        elif sudo_ready; then
             _ans="y"
         else
-            warn "Skipping DNSStubListener fix (non-interactive mode requires SEMITEXA_AUTO_FIX_DNS=1 and passwordless sudo)."
+            warn "Skipping DNSStubListener fix (no TTY and sudo requires a password)."
             _ans="n"
         fi
         if [ "$_ans" != "n" ] && [ "$_ans" != "N" ]; then
@@ -471,7 +464,6 @@ router_configure_resolved_for_test() {
                 _needs_restart=1
             else
                 warn "Failed to set DNSStubListener=yes."
-                return 1
             fi
         fi
     fi
@@ -481,10 +473,10 @@ router_configure_resolved_for_test() {
         if tty_available; then
             printf "%s? Do you want to configure this automatically? (requires sudo) [Y/n]%s " "$C_YELLOW" "$C_RESET"
             read -r _ans </dev/tty
-        elif auto_fix_dns_enabled && sudo_ready; then
+        elif sudo_ready; then
             _ans="y"
         else
-            warn "Skipping automatic .test resolver setup (non-interactive mode requires SEMITEXA_AUTO_FIX_DNS=1 and passwordless sudo)."
+            warn "Skipping automatic .test resolver setup (no TTY and sudo requires a password)."
             _ans="n"
         fi
         if [ "$_ans" != "n" ] && [ "$_ans" != "N" ]; then
@@ -494,7 +486,6 @@ router_configure_resolved_for_test() {
                 _needs_restart=1
             else
                 warn "Failed to create /etc/systemd/resolved.conf.d/semitexa-router.conf."
-                return 1
             fi
         fi
     fi
@@ -507,7 +498,6 @@ router_configure_resolved_for_test() {
             echo ""
         else
             warn "Failed to restart systemd-resolved cleanly."
-            return 1
         fi
     fi
 }
@@ -537,7 +527,7 @@ router_apply_name_resolution() {
 
     case "$_mode" in
         dns)
-            router_configure_resolved_for_test || return 1
+            router_configure_resolved_for_test
             [ -n "$_domain" ] && router_hosts_remove_domain "$_domain" >/dev/null 2>&1 || true
             ;;
         hosts)
