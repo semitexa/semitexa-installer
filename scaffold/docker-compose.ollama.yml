@@ -2,7 +2,7 @@
 # Start manually: docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
 #
 # After first start, pull a model inside the container:
-#   docker compose exec ollama ollama pull gemma4:e4b
+#   docker compose exec ollama ollama pull gemma3:4b
 
 services:
   app:

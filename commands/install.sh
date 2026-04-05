@@ -137,7 +137,7 @@ printf "       ${C_CYAN}./bin/semitexa sh${C_RESET}\n\n"
 printf "AI assistant (optional):\n\n"
 printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env.local, then:\n"
 printf "       ${C_CYAN}docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d${C_RESET}\n"
-printf "       ${C_CYAN}docker compose exec ollama ollama pull gemma4:e4b${C_RESET}\n"
+printf "       ${C_CYAN}docker compose exec ollama ollama pull gemma3:4b${C_RESET}\n"
 printf "       ${C_CYAN}./bin/semitexa php bin/semitexa ai${C_RESET}\n\n"
 printf "  The standard ${C_CYAN}bin/semitexa server:start${C_RESET} flow does not enable Ollama automatically.\n\n"
 
