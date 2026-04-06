@@ -60,6 +60,7 @@ cp /installer/scaffold/docker-compose.yml                  /app/docker-compose.y
 cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.default                        /app/.env.default
+cp /installer/scaffold/.env.default                        /app/.env
 cp /installer/scaffold/.gitignore                          /app/.gitignore
 
 mkdir -p /app/bin
@@ -102,6 +103,7 @@ chown "${_uid}:${_gid}" \
     /app/docker-compose.ollama.yml \
     /app/docker-compose.override.yml.example \
     /app/.env.default \
+    /app/.env \
     /app/.gitignore \
     /app/bin/semitexa \
     /app/scripts \
@@ -135,7 +137,7 @@ printf "For a shell inside the container:\n"
 printf "       ${C_CYAN}./bin/semitexa sh${C_RESET}\n\n"
 
 printf "AI assistant (optional):\n\n"
-printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env.local, then:\n"
+printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env, then:\n"
 printf "       ${C_CYAN}docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d${C_RESET}\n"
 printf "       ${C_CYAN}docker compose exec ollama ollama pull gemma3:4b${C_RESET}\n"
 printf "       ${C_CYAN}./bin/semitexa php bin/semitexa ai${C_RESET}\n\n"
