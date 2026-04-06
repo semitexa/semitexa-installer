@@ -67,6 +67,12 @@ mkdir -p /app/scripts
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
 cp /installer/scaffold/scripts/bootstrap-project.sh /app/scripts/bootstrap-project.sh
 
+cat <<'EOF' > /app/.env
+# Local overrides for Semitexa.
+# Keep this file uncommitted.
+# Add machine-specific values here when you need them.
+EOF
+
 success "Scaffold files written."
 
 # ── 6. Fix permissions & ownership ──────────────────────────────────────────
@@ -102,6 +108,7 @@ chown "${_uid}:${_gid}" \
     /app/docker-compose.ollama.yml \
     /app/docker-compose.override.yml.example \
     /app/.env.default \
+    /app/.env \
     /app/.gitignore \
     /app/bin/semitexa \
     /app/scripts \
@@ -135,7 +142,7 @@ printf "For a shell inside the container:\n"
 printf "       ${C_CYAN}./bin/semitexa sh${C_RESET}\n\n"
 
 printf "AI assistant (optional):\n\n"
-printf "  Enable Ollama LLM by uncommenting the LLM_* settings in .env.local, then:\n"
+printf "  Enable Ollama LLM by copying the LLM_* settings from .env.default to .env and uncommenting them, then:\n"
 printf "       ${C_CYAN}docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d${C_RESET}\n"
 printf "       ${C_CYAN}docker compose exec ollama ollama pull gemma3:4b${C_RESET}\n"
 printf "       ${C_CYAN}./bin/semitexa php bin/semitexa ai${C_RESET}\n\n"

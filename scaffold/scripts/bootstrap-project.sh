@@ -66,7 +66,6 @@ backup_installer_owned_files() {
 
     for _file in \
         ".env.default" \
-        ".env.local" \
         ".env" \
         ".gitignore" \
         "Dockerfile" \
@@ -92,7 +91,6 @@ backup_installer_owned_files() {
 restore_installer_owned_files() {
     for _path in \
         ".env.default" \
-        ".env.local" \
         ".env" \
         ".gitignore" \
         "Dockerfile" \

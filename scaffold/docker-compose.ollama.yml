@@ -1,4 +1,4 @@
-# Optional: Ollama local LLM runtime. server:start enables this overlay automatically when LLM_PROVIDER=ollama in .env.default/.env.local.
+# Optional: Ollama local LLM runtime. server:start enables this overlay automatically when LLM_PROVIDER=ollama in .env.default/.env.
 # Start manually: docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
 #
 # After first start, pull a model inside the container:
