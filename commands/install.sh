@@ -60,13 +60,18 @@ cp /installer/scaffold/docker-compose.yml                  /app/docker-compose.y
 cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.default                        /app/.env.default
-cp /installer/scaffold/.env.default                        /app/.env
 cp /installer/scaffold/.gitignore                          /app/.gitignore
 
 mkdir -p /app/bin
 mkdir -p /app/scripts
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
 cp /installer/scaffold/scripts/bootstrap-project.sh /app/scripts/bootstrap-project.sh
+
+cat <<'EOF' > /app/.env
+# Local overrides for Semitexa.
+# Keep this file uncommitted.
+# Add machine-specific values here when you need them.
+EOF
 
 success "Scaffold files written."
 
