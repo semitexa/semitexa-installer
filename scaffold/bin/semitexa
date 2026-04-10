@@ -184,6 +184,15 @@ compose_args() {
     fi
 }
 
+# Returns ALL compose files regardless of .env settings (for stop/cleanup).
+compose_all_args() {
+    _args="-f docker-compose.yml"
+    for _overlay in docker-compose.rabbitmq.yml docker-compose.mysql.yml docker-compose.redis.yml docker-compose.ollama.yml; do
+        [ -f "$PROJECT_ROOT/$_overlay" ] && _args="$_args -f $_overlay"
+    done
+    echo "$_args"
+}
+
 run_compose() {
     _compose="$(compose_bin)"
     _overlays="$(compose_args)"
@@ -881,7 +890,10 @@ cmd_server_stop() {
     fi
 
     info "Stopping containers..."
-    run_compose down
+    _compose="$(compose_bin)"
+    _overlays="$(compose_all_args)"
+    # shellcheck disable=SC2086
+    $_compose $_overlays down
     success "Semitexa environment stopped."
 
     for _pidfile in "$PROJECT_ROOT/var/swoole.pid" "$PROJECT_ROOT/var/run/semitexa.pid"; do
@@ -907,12 +919,16 @@ cmd_server_restart() {
         exit 1
     fi
 
+    _compose="$(compose_bin)"
+
     if [ -n "$_service" ]; then
         info "Recreating service: $_service"
         run_compose up -d --build --force-recreate --no-deps "$_service"
     else
         info "Recreating all containers..."
-        run_compose down
+        _overlays="$(compose_all_args)"
+        # shellcheck disable=SC2086
+        $_compose $_overlays down
         run_compose up -d --build
     fi
 
