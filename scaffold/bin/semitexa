@@ -180,6 +180,7 @@ compose_args() {
     if [ "$_has_overlay" -eq 0 ]; then
         echo ""
     else
+        [ -f "$PROJECT_ROOT/docker-compose.override.yml" ] && _args="$_args -f docker-compose.override.yml"
         echo "$_args"
     fi
 }
@@ -187,6 +188,7 @@ compose_args() {
 # Returns ALL compose files regardless of .env settings (for stop/cleanup).
 compose_all_args() {
     _args="-f docker-compose.yml"
+    [ -f "$PROJECT_ROOT/docker-compose.override.yml" ] && _args="$_args -f docker-compose.override.yml"
     for _overlay in docker-compose.nats.yml docker-compose.mysql.yml docker-compose.redis.yml docker-compose.ollama.yml; do
         [ -f "$PROJECT_ROOT/$_overlay" ] && _args="$_args -f $_overlay"
     done
@@ -892,8 +894,15 @@ cmd_server_stop() {
     info "Stopping containers..."
     _compose="$(compose_bin)"
     _overlays="$(compose_all_args)"
-    # shellcheck disable=SC2086
-    $_compose $_overlays down --remove-orphans
+    (
+        env_export_compose_context
+        if [ -n "$_overlays" ]; then
+            # shellcheck disable=SC2086
+            $_compose $_overlays down --remove-orphans
+        else
+            $_compose down --remove-orphans
+        fi
+    )
     success "Semitexa environment stopped."
 
     for _pidfile in "$PROJECT_ROOT/var/swoole.pid" "$PROJECT_ROOT/var/run/semitexa.pid"; do
@@ -927,8 +936,15 @@ cmd_server_restart() {
     else
         info "Recreating all containers..."
         _overlays="$(compose_all_args)"
-        # shellcheck disable=SC2086
-        $_compose $_overlays down --remove-orphans
+        (
+            env_export_compose_context
+            if [ -n "$_overlays" ]; then
+                # shellcheck disable=SC2086
+                $_compose $_overlays down --remove-orphans
+            else
+                $_compose down --remove-orphans
+            fi
+        )
         run_compose up -d --build
     fi
 
