@@ -361,7 +361,7 @@ router_sync_project_domains() {
     [ -n "$_domains" ] || return 0
 
     _saved_project_root="$PROJECT_ROOT"
-    _port="$(env_val SWOOLE_PORT 8080)"
+    _port="$(env_val SWOOLE_PORT 9502)"
     _mode="$(router_mode_get)"
 
     router_ensure_dirs
@@ -765,7 +765,7 @@ cmd_local_domain_add() {
         exit 1
     fi
 
-    _port="$(env_val SWOOLE_PORT 8080)"
+    _port="$(env_val SWOOLE_PORT 9502)"
     cmd_local_router_init >/dev/null
     router_registry_write_entry "$_domain" "$_port" "$(router_mode_get)"
     router_render
@@ -878,7 +878,7 @@ cmd_server_start() {
     info "Starting containers..."
     run_compose up -d --build
 
-    _port="$(env_val SWOOLE_PORT 8080)"
+    _port="$(env_val SWOOLE_PORT 9502)"
     printf "\n"
     success "Semitexa environment started!"
     info "App:  ${C_GREEN}http://localhost:${_port}${C_RESET}"
