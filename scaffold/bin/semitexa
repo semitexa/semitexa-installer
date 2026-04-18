@@ -361,7 +361,7 @@ router_sync_project_domains() {
     [ -n "$_domains" ] || return 0
 
     _saved_project_root="$PROJECT_ROOT"
-    _port="$(env_val SWOOLE_PORT 8080)"
+    _port="$(env_val SWOOLE_PORT 9502)"
     _mode="$(router_mode_get)"
 
     router_ensure_dirs
@@ -410,6 +410,11 @@ router_generate_nginx_config() {
     router_ensure_dirs
     _saved_project_root="$PROJECT_ROOT"
     cat > "$ROUTER_NGINX_DEFAULT" <<'EOF'
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
 server {
     listen 80 default_server;
     server_name _;
@@ -435,12 +440,33 @@ server {
     listen 80;
     server_name $DOMAIN;
 
-    location / {
+    location ~ ^/(?:__semitexa_sse|sse|__semitexa_kiss)$ {
         proxy_pass http://$UPSTREAM_HOST:$UPSTREAM_PORT;
+        proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+    }
+
+    location / {
+        proxy_pass http://$UPSTREAM_HOST:$UPSTREAM_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 }
 
@@ -739,7 +765,7 @@ cmd_local_domain_add() {
         exit 1
     fi
 
-    _port="$(env_val SWOOLE_PORT 8080)"
+    _port="$(env_val SWOOLE_PORT 9502)"
     cmd_local_router_init >/dev/null
     router_registry_write_entry "$_domain" "$_port" "$(router_mode_get)"
     router_render
@@ -852,7 +878,7 @@ cmd_server_start() {
     info "Starting containers..."
     run_compose up -d --build
 
-    _port="$(env_val SWOOLE_PORT 8080)"
+    _port="$(env_val SWOOLE_PORT 9502)"
     printf "\n"
     success "Semitexa environment started!"
     info "App:  ${C_GREEN}http://localhost:${_port}${C_RESET}"
