@@ -57,6 +57,9 @@ info "Scaffolding Semitexa Ultimate project..."
 
 cp /installer/scaffold/Dockerfile                          /app/Dockerfile
 cp /installer/scaffold/docker-compose.yml                  /app/docker-compose.yml
+cp /installer/scaffold/docker-compose.mysql.yml            /app/docker-compose.mysql.yml
+cp /installer/scaffold/docker-compose.redis.yml            /app/docker-compose.redis.yml
+cp /installer/scaffold/docker-compose.nats.yml             /app/docker-compose.nats.yml
 cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.default                        /app/.env.default
@@ -105,6 +108,9 @@ chown "${_uid}:${_gid}" \
     /app/bin \
     /app/Dockerfile \
     /app/docker-compose.yml \
+    /app/docker-compose.mysql.yml \
+    /app/docker-compose.redis.yml \
+    /app/docker-compose.nats.yml \
     /app/docker-compose.ollama.yml \
     /app/docker-compose.override.yml.example \
     /app/.env.default \
@@ -129,14 +135,14 @@ printf "Your project has been scaffolded in the current directory.\n\n"
 printf "Next steps:\n\n"
 
 printf "  1. Start the environment:\n"
-printf "       ${C_CYAN}docker compose up -d${C_RESET}\n"
+printf "       ${C_CYAN}./bin/semitexa server:start${C_RESET}\n"
 printf "     (first run auto-installs Semitexa via Composer — may take a minute)\n\n"
 
 printf "  2. Run database migrations:\n"
-printf "       ${C_CYAN}./bin/semitexa php bin/semitexa db:migrate${C_RESET}\n\n"
+printf "       ${C_CYAN}./bin/semitexa db:migrate${C_RESET}\n\n"
 
 printf "  3. Open your app:\n"
-printf "       ${C_CYAN}http://localhost:8080${C_RESET}\n\n"
+printf "       ${C_CYAN}http://localhost:9502${C_RESET}\n\n"
 
 printf "For a shell inside the container:\n"
 printf "       ${C_CYAN}./bin/semitexa sh${C_RESET}\n\n"
