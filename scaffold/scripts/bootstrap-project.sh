@@ -70,6 +70,9 @@ backup_installer_owned_files() {
         ".gitignore" \
         "Dockerfile" \
         "docker-compose.yml" \
+        "docker-compose.mysql.yml" \
+        "docker-compose.redis.yml" \
+        "docker-compose.nats.yml" \
         "docker-compose.ollama.yml" \
         "docker-compose.override.yml.example"
     do
@@ -95,6 +98,9 @@ restore_installer_owned_files() {
         ".gitignore" \
         "Dockerfile" \
         "docker-compose.yml" \
+        "docker-compose.mysql.yml" \
+        "docker-compose.redis.yml" \
+        "docker-compose.nats.yml" \
         "docker-compose.ollama.yml" \
         "docker-compose.override.yml.example" \
         "bin/semitexa" \
