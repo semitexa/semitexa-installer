@@ -70,10 +70,29 @@ mkdir -p /app/scripts
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
 cp /installer/scaffold/scripts/bootstrap-project.sh /app/scripts/bootstrap-project.sh
 
-cat <<'EOF' > /app/.env
+# Generate a stable, per-installation SEMITEXA_APP_ID (UUIDv4). The host-side
+# `bin/semitexa local-app:reconcile` (auto-invoked from `server:start`) uses
+# this id to allocate a unique Swoole port from the shared workstation router
+# registry, so multiple Semitexa projects on the same machine never collide.
+_app_id=""
+if command -v uuidgen >/dev/null 2>&1; then
+    _app_id="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+elif [ -r /proc/sys/kernel/random/uuid ]; then
+    _app_id="$(cat /proc/sys/kernel/random/uuid 2>/dev/null)"
+fi
+if [ -z "$_app_id" ]; then
+    warn "Could not generate SEMITEXA_APP_ID inside the installer container."
+    warn "It will be generated on first 'bin/semitexa server:start' instead."
+fi
+
+cat > /app/.env <<EOF
 # Local overrides for Semitexa.
 # Keep this file uncommitted.
 # Add machine-specific values here when you need them.
+
+# Stable per-installation id used by the shared local router to allocate a
+# unique Swoole port for this project. Do not reuse across installs.
+SEMITEXA_APP_ID=${_app_id}
 EOF
 
 success "Scaffold files written."
