@@ -1857,8 +1857,25 @@ cmd_test_run() {
     # also have packages/*/tests — this is where monorepo awareness lives
     # (phpunit.xml.dist stays minimal and environment-agnostic).
     _has_positional=0
+    _expects_option_value=0
+    _after_options=0
     for _arg in "$@"; do
+        if [ "$_after_options" -eq 1 ]; then
+            _has_positional=1
+            break
+        fi
+        if [ "$_expects_option_value" -eq 1 ]; then
+            _expects_option_value=0
+            continue
+        fi
         case "$_arg" in
+            --)
+                _after_options=1
+                ;;
+            -c|--configuration|--bootstrap|--filter|--testsuite|--group|--exclude-group|--test-suffix|--log-junit|--coverage-clover|--coverage-html|--coverage-text|--coverage-xml|--coverage-filter|-d)
+                _expects_option_value=1
+                ;;
+            --*=*) ;;
             -*) ;;
             *) _has_positional=1; break ;;
         esac
