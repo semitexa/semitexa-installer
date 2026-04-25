@@ -1394,6 +1394,22 @@ cmd_local_app_doctor() {
     cmd_local_app_list
 }
 
+# Run the frontend skin-mode regression guard (scripts/lint-skin-legacy-markers.sh).
+# Fails when forbidden legacy theme markers reappear in the migrated marketing
+# packages or when the three site.js files drift apart. Demo + Hello scaffold
+# are intentionally NOT scanned (deferred to tk-demo-hello-skin-migration-followup).
+cmd_lint_skin_legacy() {
+    _script="$PROJECT_ROOT/scripts/lint-skin-legacy-markers.sh"
+    if [ ! -f "$_script" ]; then
+        info "Skin-mode legacy guard script not present in this project."
+        info "  (Expected at: scripts/lint-skin-legacy-markers.sh)"
+        info "  This is normal for fresh installs / single-app starters that don't"
+        info "  ship the marketing-site packages. Nothing to enforce — skipping."
+        exit 0
+    fi
+    PROJECT_ROOT="$PROJECT_ROOT" sh "$_script" "$@"
+}
+
 # Returns 0 if the captured compose log contains a clear port-conflict signal
 # AND mentions <port>. Conservative: only fires when both halves match, so
 # unrelated compose failures fall through to the default error path.
@@ -1654,6 +1670,7 @@ cmd_list() {
     printf "  %-32s %s\n" "local-app:list"          "List local app registrations and ports"
     printf "  %-32s %s\n" "local-app:remove <id>"   "Remove an app from the local registry"
     printf "  %-32s %s\n" "local-app:doctor"        "Inspect local app registry health"
+    printf "  %-32s %s\n" "lint:skin-legacy"        "Regression guard for the unified frontend skin-mode contract"
     printf "  %-32s %s\n" "test:run [-- phpunit-args]" "Run PHPUnit inside Docker (APP_ENV=dev)"
     printf "  %-32s %s\n" "self-test"             "Verify setup"
     printf "  %-32s %s\n" "list"                  "Show this help"
@@ -1686,6 +1703,13 @@ cmd_self_test() {
     _arch="$(uname -m 2>/dev/null || echo unknown)"
     case "$_arch" in x86_64|amd64) success "Arch: AMD64" ;; aarch64|arm64) success "Arch: ARM64" ;; *) warn "Arch: $_arch (untested)" ;; esac
     if is_app_running; then success "App container: running"; _ok=$((_ok+1)); else info "App container: not running"; fi
+    if [ -f "$PROJECT_ROOT/scripts/lint-skin-legacy-markers.sh" ]; then
+        if ( PROJECT_ROOT="$PROJECT_ROOT" sh "$PROJECT_ROOT/scripts/lint-skin-legacy-markers.sh" >/dev/null 2>&1 ); then
+            success "Skin-mode legacy guard: clean"; _ok=$((_ok+1))
+        else
+            error "Skin-mode legacy guard: FAILED — run 'bin/semitexa lint:skin-legacy' for details"; _fail=$((_fail+1))
+        fi
+    fi
     printf "\n  Results: %s%d OK%s, %s%d Warn%s, %s%d Error%s\n\n" "$C_GREEN" "$_ok" "$C_RESET" "$C_YELLOW" "$_warn" "$C_RESET" "$C_RED" "$_fail" "$C_RESET"
     [ "$_fail" -gt 0 ] && exit 1; exit 0
 }
@@ -1989,6 +2013,7 @@ case "$COMMAND" in
     local-app:list) cmd_local_app_list "$@" ;;
     local-app:remove) cmd_local_app_remove "$@" ;;
     local-app:doctor) cmd_local_app_doctor "$@" ;;
+    lint:skin-legacy) cmd_lint_skin_legacy "$@" ;;
     install)         cmd_install "$@" ;;
     demo:install)    cmd_demo_install "$@" ;;
     test:run)        cmd_test_run "$@" ;;
