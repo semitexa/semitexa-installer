@@ -61,6 +61,7 @@ cp /installer/scaffold/docker-compose.mysql.yml            /app/docker-compose.m
 cp /installer/scaffold/docker-compose.redis.yml            /app/docker-compose.redis.yml
 cp /installer/scaffold/docker-compose.nats.yml             /app/docker-compose.nats.yml
 cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
+cp /installer/scaffold/docker-compose.test.yml             /app/docker-compose.test.yml
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.default                        /app/.env.default
 cp /installer/scaffold/.gitignore                          /app/.gitignore
