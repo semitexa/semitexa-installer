@@ -67,9 +67,7 @@ cp /installer/scaffold/.env.default                        /app/.env.default
 cp /installer/scaffold/.gitignore                          /app/.gitignore
 
 mkdir -p /app/bin
-mkdir -p /app/scripts
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
-cp /installer/scaffold/scripts/bootstrap-project.sh /app/scripts/bootstrap-project.sh
 
 # Generate a stable, per-installation SEMITEXA_APP_ID (UUIDv4). The host-side
 # `bin/semitexa local-app:reconcile` (auto-invoked from `server:start`) uses
@@ -99,7 +97,7 @@ EOF
 success "Scaffold files written."
 
 # ── 6. Fix permissions & ownership ──────────────────────────────────────────
-chmod +x /app/bin/semitexa /app/scripts/bootstrap-project.sh
+chmod +x /app/bin/semitexa
 
 # Fix ownership to match the host user who owns /app.
 #
@@ -136,9 +134,7 @@ chown "${_uid}:${_gid}" \
     /app/.env.default \
     /app/.env \
     /app/.gitignore \
-    /app/bin/semitexa \
-    /app/scripts \
-    /app/scripts/bootstrap-project.sh
+    /app/bin/semitexa
 
 success "File ownership set to ${_uid}:${_gid}."
 
