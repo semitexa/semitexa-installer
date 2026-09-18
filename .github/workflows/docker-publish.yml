@@ -14,6 +14,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Default is true, which leaves the GITHUB_TOKEN in .git/config for
+          # every later step to read. This job builds an image and pushes it to
+          # Docker Hub; it never talks to git again, so the credential is pure
+          # exposure — a build step, or anything the build pulls in, can read it.
+          persist-credentials: false
 
       - name: Set up QEMU (for multi-arch)
         uses: docker/setup-qemu-action@v3
