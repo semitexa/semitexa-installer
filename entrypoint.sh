@@ -13,7 +13,7 @@ case "$COMMAND" in
 Semitexa Ultimate Installer
 
 Usage:
-  docker run --rm -v $(pwd):/app semitexa/installer <command>
+  docker run --rm -v "$(pwd)":/app semitexa/installer <command>
 
 Commands:
   install [--force]   Scaffold a new Semitexa project into the current directory
@@ -21,8 +21,8 @@ Commands:
 
 Example:
   mkdir my-project && cd my-project
-  docker run --rm -v $(pwd):/app semitexa/installer install
-  docker compose up -d
+  docker run --rm -v "$(pwd)":/app semitexa/installer install
+  ./bin/semitexa server:start
 EOF
         ;;
     *)
