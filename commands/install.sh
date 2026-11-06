@@ -66,8 +66,9 @@ cp /installer/scaffold/docker-compose.test.yml             /app/docker-compose.t
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.default                        /app/.env.default
 cp /installer/scaffold/.gitignore                          /app/.gitignore
+# A folder holding only .claude passes the guard above: a skill of its own stays.
 mkdir -p /app/.claude/skills/make-it
-cp /installer/scaffold/.claude/skills/make-it/SKILL.md      /app/.claude/skills/make-it/SKILL.md
+[ -e /app/.claude/skills/make-it/SKILL.md ] || cp /installer/scaffold/.claude/skills/make-it/SKILL.md /app/.claude/skills/make-it/SKILL.md
 
 mkdir -p /app/bin
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
@@ -124,6 +125,7 @@ if [ "$_uid" -eq 0 ] && [ -z "${INSTALL_UID:-}" ]; then
     fi
 fi
 
+chown -R "${_uid}:${_gid}" /app/.claude
 chown "${_uid}:${_gid}" \
     /app \
     /app/bin \
