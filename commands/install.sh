@@ -66,6 +66,8 @@ cp /installer/scaffold/docker-compose.test.yml             /app/docker-compose.t
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.default                        /app/.env.default
 cp /installer/scaffold/.gitignore                          /app/.gitignore
+mkdir -p /app/.claude/skills/make-it
+cp /installer/scaffold/.claude/skills/make-it/SKILL.md      /app/.claude/skills/make-it/SKILL.md
 
 mkdir -p /app/bin
 cp /installer/scaffold/bin/semitexa /app/bin/semitexa
