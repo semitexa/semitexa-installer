@@ -63,6 +63,10 @@ cp /installer/scaffold/docker-compose.nats.yml             /app/docker-compose.n
 cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
 cp /installer/scaffold/docker-compose.worker.yml           /app/docker-compose.worker.yml
 cp /installer/scaffold/docker-compose.test.yml             /app/docker-compose.test.yml
+# What test:run needs to run E2E tests: the runner's image is built here, not pulled.
+mkdir -p /app/docker/e2e-runner
+cp /installer/scaffold/docker/e2e-runner/Dockerfile        /app/docker/e2e-runner/Dockerfile
+cp /installer/scaffold/playwright.config.ts                /app/playwright.config.ts
 cp /installer/scaffold/docker-compose.override.yml.example /app/docker-compose.override.yml.example
 cp /installer/scaffold/.env.default                        /app/.env.default
 cp /installer/scaffold/.gitignore                          /app/.gitignore
@@ -125,7 +129,7 @@ if [ "$_uid" -eq 0 ] && [ -z "${INSTALL_UID:-}" ]; then
     fi
 fi
 
-chown -R "${_uid}:${_gid}" /app/.claude
+chown -R "${_uid}:${_gid}" /app/.claude /app/docker
 chown "${_uid}:${_gid}" \
     /app \
     /app/bin \
@@ -136,6 +140,8 @@ chown "${_uid}:${_gid}" \
     /app/docker-compose.nats.yml \
     /app/docker-compose.ollama.yml \
     /app/docker-compose.worker.yml \
+    /app/docker-compose.test.yml \
+    /app/playwright.config.ts \
     /app/docker-compose.override.yml.example \
     /app/.env.default \
     /app/.env \
