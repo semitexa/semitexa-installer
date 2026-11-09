@@ -63,14 +63,16 @@ fi
 # decompression-bomb cap. bin/semitexa update moves core and the Dockerfile
 # together, so it is the way forward for such a project.
 #   - a release older than MIN_CORE is refused;
-#   - a dev-* core installed from git carries the commit time in the lock, and
-#     one older than core#195's merge is refused; a path-repository core (the
-#     framework workspace) has no time and is the live checkout, so it passes;
+#   - a dev-* core installed from git carries its commit time in the lock, and
+#     one older than the fix (core 82eccf6, committed 2026-10-30T06:27:43Z) is
+#     refused, as is one whose time is missing or unreadable; only a
+#     path-repository core (the framework workspace, the live checkout) passes
+#     unchecked;
 #   - a lock that cannot be read is refused: a guard that cannot check must
 #     not pass. A project with no lock yet has nothing installed to protect.
 MIN_CORE=2026.10.31.0849
-MIN_CORE_TIME=2026-10-30T07:24:42+00:00
-if [ -f /app/composer.lock ]; then
+MIN_CORE_TIME=2026-10-30T06:27:43+00:00
+if [ -e /app/composer.lock ] || [ -L /app/composer.lock ]; then
     _verdict="$(php -r '
         $lock = json_decode((string) @file_get_contents("/app/composer.lock"), true);
         if (!is_array($lock) || !is_array($lock["packages"] ?? null)) { echo "invalid"; exit; }
@@ -78,8 +80,9 @@ if [ -f /app/composer.lock ]; then
             if (!is_array($p) || ($p["name"] ?? "") !== "semitexa/core") { continue; }
             $v = ltrim((string) ($p["version"] ?? ""), "v");
             if (preg_match("/^[0-9]/", $v) === 1) { echo version_compare($v, $argv[1], "<") ? "old $v" : "ok"; exit; }
+            if ((is_array($p["dist"] ?? null) ? ($p["dist"]["type"] ?? null) : null) === "path") { echo "ok"; exit; }
             $t = is_string($p["time"] ?? null) ? strtotime($p["time"]) : false;
-            echo ($t !== false && $t < strtotime($argv[2])) ? "old-dev $v " . $p["time"] : "ok";
+            echo $t === false ? "old-dev $v (no readable commit time)" : ($t < strtotime($argv[2]) ? "old-dev $v " . $p["time"] : "ok");
             exit;
         }
         echo "ok";' "$MIN_CORE" "$MIN_CORE_TIME" 2>/dev/null || echo invalid)"
@@ -91,7 +94,7 @@ if [ -f /app/composer.lock ]; then
             exit 4
             ;;
         old-dev\ *)
-            error "This project locks semitexa/core ${_verdict#old-dev } (a development commit older than the fix the scaffold needs)."
+            error "This project locks semitexa/core ${_verdict#old-dev }: a development commit that cannot be shown to carry the fix the scaffold needs (core 82eccf6)."
             error "Run 'bin/semitexa update' in the project instead: it upgrades core and the Dockerfile together."
             exit 4
             ;;
