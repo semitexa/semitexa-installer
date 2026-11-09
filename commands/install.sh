@@ -7,6 +7,8 @@
 #   1  /app not mounted or not writable
 #   2  Directory is non-empty and --force not set
 #   3  Internal scaffold error
+#   4  --force over a project whose locked semitexa/core is older than the
+#      scaffold needs (run bin/semitexa update there instead)
 set -e
 
 # ── Colour helpers ──────────────────────────────────────────────────────────
@@ -50,6 +52,32 @@ if [ "$_non_hidden" -gt 0 ] && [ "$FORCE" -eq 0 ]; then
     error "Directory is not empty. Use --force to overwrite."
     error "WARNING: --force will overwrite existing scaffold files."
     exit 2
+fi
+
+# ── 2a. Guard the core the new Dockerfile needs ─────────────────────────────
+# --force over an existing project replaces the Dockerfile but keeps its
+# composer.lock. The Dockerfile pins a Swoole whose curl hook inflates gzip
+# before the client sees it; only semitexa/core from MIN_CORE on turns that off
+# (core#195). An older locked core, rebuilt on this Dockerfile, would lose the
+# decompression-bomb cap. bin/semitexa update moves core and the Dockerfile
+# together, so it is the way forward for such a project. A dev-* core (the
+# framework workspace) and a project with no lock yet are not checked.
+MIN_CORE=2026.10.31.0849
+if [ -f /app/composer.lock ]; then
+    _core="$(php -r '
+        $lock = json_decode((string) file_get_contents("/app/composer.lock"), true);
+        foreach (array_merge($lock["packages"] ?? [], $lock["packages-dev"] ?? []) as $p) {
+            if (($p["name"] ?? "") === "semitexa/core") { echo ltrim((string) ($p["version"] ?? ""), "v"); }
+        }' 2>/dev/null || true)"
+    case "$_core" in
+        [0-9]*)
+            if php -r 'exit(version_compare($argv[1], $argv[2], "<") ? 0 : 1);' "$_core" "$MIN_CORE"; then
+                error "This project locks semitexa/core ${_core}; the scaffold needs ${MIN_CORE} or later."
+                error "Run 'bin/semitexa update' in the project instead: it upgrades core and the Dockerfile together."
+                exit 4
+            fi
+            ;;
+    esac
 fi
 
 # ── 3. Copy scaffold files ───────────────────────────────────────────────────
