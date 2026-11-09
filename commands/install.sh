@@ -7,6 +7,9 @@
 #   1  /app not mounted or not writable
 #   2  Directory is non-empty and --force not set
 #   3  Internal scaffold error
+#   4  --force over a project whose locked semitexa/core is older than the
+#      scaffold needs (run bin/semitexa update there instead), or whose
+#      composer.lock cannot be read
 set -e
 
 # ── Colour helpers ──────────────────────────────────────────────────────────
@@ -50,6 +53,57 @@ if [ "$_non_hidden" -gt 0 ] && [ "$FORCE" -eq 0 ]; then
     error "Directory is not empty. Use --force to overwrite."
     error "WARNING: --force will overwrite existing scaffold files."
     exit 2
+fi
+
+# ── 2a. Guard the core the new Dockerfile needs ─────────────────────────────
+# --force over an existing project replaces the Dockerfile but keeps its
+# composer.lock. The Dockerfile pins a Swoole whose curl hook inflates gzip
+# before the client sees it; only semitexa/core with core#195 turns that off.
+# An older locked core, rebuilt on this Dockerfile, would lose the
+# decompression-bomb cap. bin/semitexa update moves core and the Dockerfile
+# together, so it is the way forward for such a project.
+#   - a release older than MIN_CORE is refused;
+#   - a dev-* core installed from git carries its commit time in the lock, and
+#     one older than the fix (core 82eccf6, committed 2026-10-30T06:27:43Z) is
+#     refused, as is one whose time is missing or unreadable; only a
+#     path-repository core (the framework workspace, the live checkout) passes
+#     unchecked;
+#   - a lock that cannot be read is refused: a guard that cannot check must
+#     not pass. A project with no lock yet has nothing installed to protect.
+MIN_CORE=2026.10.31.0849
+MIN_CORE_TIME=2026-10-30T06:27:43+00:00
+if [ -e /app/composer.lock ] || [ -L /app/composer.lock ]; then
+    _verdict="$(php -r '
+        $lock = json_decode((string) @file_get_contents("/app/composer.lock"), true);
+        if (!is_array($lock) || !is_array($lock["packages"] ?? null)) { echo "invalid"; exit; }
+        foreach (array_merge($lock["packages"], is_array($lock["packages-dev"] ?? null) ? $lock["packages-dev"] : []) as $p) {
+            if (!is_array($p) || ($p["name"] ?? "") !== "semitexa/core") { continue; }
+            $v = ltrim((string) ($p["version"] ?? ""), "v");
+            if (preg_match("/^[0-9]/", $v) === 1) { echo version_compare($v, $argv[1], "<") ? "old $v" : "ok"; exit; }
+            if ((is_array($p["dist"] ?? null) ? ($p["dist"]["type"] ?? null) : null) === "path") { echo "ok"; exit; }
+            $t = is_string($p["time"] ?? null) ? strtotime($p["time"]) : false;
+            echo $t === false ? "old-dev $v (no readable commit time)" : ($t < strtotime($argv[2]) ? "old-dev $v " . $p["time"] : "ok");
+            exit;
+        }
+        echo "ok";' "$MIN_CORE" "$MIN_CORE_TIME" 2>/dev/null || echo invalid)"
+    case "$_verdict" in
+        ok) ;;
+        old\ *)
+            error "This project locks semitexa/core ${_verdict#old }; the scaffold needs ${MIN_CORE} or later."
+            error "Run 'bin/semitexa update' in the project instead: it upgrades core and the Dockerfile together."
+            exit 4
+            ;;
+        old-dev\ *)
+            error "This project locks semitexa/core ${_verdict#old-dev }: a development commit that cannot be shown to carry the fix the scaffold needs (core 82eccf6)."
+            error "Run 'bin/semitexa update' in the project instead: it upgrades core and the Dockerfile together."
+            exit 4
+            ;;
+        *)
+            error "/app/composer.lock cannot be read, so the installed semitexa/core cannot be checked."
+            error "Repair it (composer install) or remove it, then run the installer again."
+            exit 4
+            ;;
+    esac
 fi
 
 # ── 3. Copy scaffold files ───────────────────────────────────────────────────
