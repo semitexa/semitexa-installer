@@ -1332,15 +1332,27 @@ router_warn_if_public() {
             *) _public="${_public:+$_public }$_address" ;;
         esac
     done
-    [ -n "$_public" ] || return 0
-    warn "The shared local router answers beyond this machine ($_public), not only on 127.0.0.1."
-    warn "A Semitexa project with an older bin/semitexa reopens it whenever it starts the router: run 'bin/semitexa update' in each of your projects."
+    if [ -n "$_public" ]; then
+        warn "The shared local router answers beyond this machine ($_public), not only on 127.0.0.1."
+        warn "A Semitexa project with an older bin/semitexa reopens it whenever it starts the router: run 'bin/semitexa update' in each of your projects."
+        info "Rebinding it to 127.0.0.1."
+        return 1
+    fi
+    # Before Docker Engine 28 a port published on 127.0.0.1 is still reachable
+    # from a host on the same network segment (fixed in 28.0, see the Docker
+    # port-publishing docs), so loopback there is not this machine only.
+    _engine="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    case "$_engine" in
+        ''|2[8-9].*|[3-9][0-9].*|[1-9][0-9][0-9]*) return 0 ;;
+    esac
+    warn "Docker Engine $_engine does not keep a port published on 127.0.0.1 from hosts on the same network; 28.0 does."
+    warn "The router is reachable from your network segment until Docker is upgraded."
     return 1
 }
 
 router_start_for_mode() {
     _mode="$(router_mode_get)"
-    router_warn_if_public || info "Rebinding it to 127.0.0.1."
+    router_warn_if_public || true
     router_render
     case "$_mode" in
         dns)
@@ -1389,7 +1401,7 @@ cmd_local_router_stop() {
 cmd_local_router_restart() {
     printf "\n%s%s Semitexa — Shared Local Router Restart %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
     cmd_local_router_init >/dev/null
-    router_warn_if_public || info "Rebinding it to 127.0.0.1."
+    router_warn_if_public || true
     router_render
     _mode="$(router_mode_get)"
     # up -d first: `restart` keeps a container's old configuration, so a
