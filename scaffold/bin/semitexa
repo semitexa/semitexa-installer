@@ -1181,8 +1181,12 @@ services:
     image: nginx:alpine
     container_name: semitexa-router-proxy
     restart: unless-stopped
+    # This machine only, as the DNS above: *.test resolves to 127.0.0.1 and
+    # nowhere else, so nobody else ever reaches the router by name. On 0.0.0.0
+    # anyone on the network could send any registered Host to port 80 and be
+    # proxied into that project's dev stack.
     ports:
-      - "80:80"
+      - "127.0.0.1:80:80"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -1357,11 +1361,17 @@ cmd_local_router_restart() {
     cmd_local_router_init >/dev/null
     router_render
     _mode="$(router_mode_get)"
+    # up -d first: `restart` keeps a container's old configuration, so a
+    # rendered compose with new ports (127.0.0.1:80, 2026-11-09) never reached
+    # the running router. up -d recreates what changed; restart then reloads
+    # the nginx and dnsmasq files the containers mount.
     case "$_mode" in
         dns)
+            router_compose up -d dns proxy
             router_compose restart dns proxy
             ;;
         hosts)
+            router_compose up -d proxy
             router_compose restart proxy
             ;;
     esac
