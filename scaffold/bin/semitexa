@@ -1323,14 +1323,19 @@ router_proxy_published() {
 # restart run it before `up -d`, doctor reports it. Returns 1 when public.
 router_warn_if_public() {
     _published="$(router_proxy_published)"
-    case "$_published" in
-        *0.0.0.0*|*'[::]'*)
-            warn "The shared local router answers on every interface ($_published), not only this machine."
-            warn "A Semitexa project with an older bin/semitexa reopens it whenever it starts the router: run 'bin/semitexa update' in each of your projects."
-            return 1
-            ;;
-    esac
-    return 0
+    _public=''
+    # Loopback is the only local-only answer. Anything else - 0.0.0.0, [::],
+    # or one LAN address such as 192.168.1.100 - is reachable from others.
+    for _address in $_published; do
+        case "$_address" in
+            127.*|'[::1]'|::1) ;;
+            *) _public="${_public:+$_public }$_address" ;;
+        esac
+    done
+    [ -n "$_public" ] || return 0
+    warn "The shared local router answers beyond this machine ($_public), not only on 127.0.0.1."
+    warn "A Semitexa project with an older bin/semitexa reopens it whenever it starts the router: run 'bin/semitexa update' in each of your projects."
+    return 1
 }
 
 router_start_for_mode() {
