@@ -1309,8 +1309,33 @@ router_apply_name_resolution() {
     esac
 }
 
+# The addresses the running router proxy publishes port 80 on, space-separated;
+# nothing when it is not running or docker is not here.
+router_proxy_published() {
+    command -v docker >/dev/null 2>&1 || return 0
+    docker port semitexa-router-proxy 80/tcp 2>/dev/null | sed 's/:[0-9]*$//' | tr '\n' ' ' | sed 's/ *$//'
+}
+
+# The router workspace is shared by every project on the machine, and each
+# project's own bin/semitexa renders it. One with a script from before
+# 2026-11-09 writes "80:80" and reopens the router to the network whenever it
+# starts it. This script cannot stop that, so it says so and rebinds: start and
+# restart run it before `up -d`, doctor reports it. Returns 1 when public.
+router_warn_if_public() {
+    _published="$(router_proxy_published)"
+    case "$_published" in
+        *0.0.0.0*|*'[::]'*)
+            warn "The shared local router answers on every interface ($_published), not only this machine."
+            warn "A Semitexa project with an older bin/semitexa reopens it whenever it starts the router: run 'bin/semitexa update' in each of your projects."
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 router_start_for_mode() {
     _mode="$(router_mode_get)"
+    router_warn_if_public || info "Rebinding it to 127.0.0.1."
     router_render
     case "$_mode" in
         dns)
@@ -1359,6 +1384,7 @@ cmd_local_router_stop() {
 cmd_local_router_restart() {
     printf "\n%s%s Semitexa — Shared Local Router Restart %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
     cmd_local_router_init >/dev/null
+    router_warn_if_public || info "Rebinding it to 127.0.0.1."
     router_render
     _mode="$(router_mode_get)"
     # up -d first: `restart` keeps a container's old configuration, so a
@@ -1395,6 +1421,11 @@ cmd_local_router_doctor() {
     if [ -f "$ROUTER_COMPOSE" ]; then
         printf "\n"
         router_compose ps || true
+    fi
+    if [ -n "$(router_proxy_published)" ] && router_warn_if_public; then
+        success "The router proxy answers this machine only ($(router_proxy_published))."
+    else
+        [ -z "$(router_proxy_published)" ] || info "Fix: bin/semitexa local-router:restart, after updating the older projects."
     fi
 
     printf "\n"
