@@ -3190,12 +3190,14 @@ ${_url_clean}/tests"
     _e2e_why="$(e2e_isolation_unavailable "$_compose" "$_overlays" || true)"
     if [ -z "$_e2e_why" ]; then
         e2e_database_reset "$_compose" "$_overlays" || exit 1
-        _e2e_isolated="$(e2e_app_start "$_compose" "$_overlays")" || exit 1
-        # Removed on every way out from here: a failed step, Ctrl-C, a kill.
+        # Removed on every way out from here: a failed step, Ctrl-C or a kill,
+        # the 90 s the app takes to answer included (review, ultimate#135).
+        _e2e_cleanup="$(e2e_container_name)"
         # shellcheck disable=SC2064
-        trap "docker rm -f '$_e2e_isolated' >/dev/null 2>&1 || true" EXIT
+        trap "docker rm -f '$_e2e_cleanup' >/dev/null 2>&1 || true" EXIT
         trap 'exit 130' INT
         trap 'exit 143' TERM
+        _e2e_isolated="$(e2e_app_start "$_compose" "$_overlays")" || exit 1
         info "E2E runs on its own app ($_e2e_isolated) and database ($(e2e_db_name)), not the one you work in."
     else
         warn "E2E runs against your running app and writes into its database: $_e2e_why."
@@ -3827,12 +3829,18 @@ e2e_database_reset() {
         || { error "Seeding the E2E database '$_e2e_name' failed."; return 1; }
 }
 
+# The E2E app's container name: unique per checkout (two with one directory
+# name must not remove each other's app) and starting with a letter, as
+# Docker requires. Known before the app starts, so the cleanup trap can be
+# set first.
+e2e_container_name() {
+    printf '%s' "semitexa-e2e-$(basename "$PROJECT_ROOT" | tr -c 'a-zA-Z0-9_.\n-' '-')-$(printf '%s' "$PROJECT_ROOT" | cksum | cut -d' ' -f1)"
+}
+
 # Starts the E2E app and waits until it answers. Prints its container name.
 #   $1 compose binary   $2 compose -f arguments
 e2e_app_start() {
-    # Unique per checkout (two with one directory name must not remove each
-    # other's app) and starting with a letter, as Docker requires.
-    _e2e_container="semitexa-e2e-$(basename "$PROJECT_ROOT" | tr -c 'a-zA-Z0-9_.\n-' '-')-$(printf '%s' "$PROJECT_ROOT" | cksum | cut -d' ' -f1)"
+    _e2e_container="$(e2e_container_name)"
     docker rm -f "$_e2e_container" >/dev/null 2>&1 || true
     # shellcheck disable=SC2046,SC2086
     ( env_export_compose_context; $1 $2 run -d --no-deps --name "$_e2e_container" $(e2e_app_args) app >/dev/null < /dev/null ) \
