@@ -1115,11 +1115,12 @@ router_attach_project() {
     docker inspect semitexa-router-proxy >/dev/null 2>&1 || return 0
     _ra_compose="$(compose_bin)"
     # shellcheck disable=SC2086
-    _ra_cid="$($_ra_compose $(compose_args) ps -q app 2>/dev/null </dev/null | head -n 1)"
+    _ra_cid="$($_ra_compose $(compose_args) ps -q app 2>/dev/null </dev/null | head -n 1 || true)"
     [ -n "$_ra_cid" ] || return 0
-    _ra_name="$(docker inspect -f '{{.Name}}' "$_ra_cid" 2>/dev/null | sed 's#^/##')"
-    _ra_proj="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$_ra_cid" 2>/dev/null)"
-    _ra_nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$_ra_cid" 2>/dev/null | sed '/^$/d')"
+    # || true throughout: an app that died right after up is not a reason to stop.
+    _ra_name="$(docker inspect -f '{{.Name}}' "$_ra_cid" 2>/dev/null | sed 's#^/##' || true)"
+    _ra_proj="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$_ra_cid" 2>/dev/null || true)"
+    _ra_nets="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' "$_ra_cid" 2>/dev/null | sed '/^$/d' || true)"
     _ra_net="$(printf '%s\n' "$_ra_nets" | grep -Fx -- "${_ra_proj}_default" | head -n 1)"
     [ -n "$_ra_net" ] || _ra_net="$(printf '%s\n' "$_ra_nets" | head -n 1)"
     [ -n "$_ra_name" ] && [ -n "$_ra_net" ] || return 0
@@ -1145,14 +1146,29 @@ router_attach_project() {
 }
 
 # Takes the router off this project's networks, so `down` can remove them
-# ("network has active endpoints" otherwise).
+# ("network has active endpoints" otherwise, and set -e then ends the run
+# before `up`). Docker says which networks are the project's, by the compose
+# project label: the registry can have lost the entry (local-domain:remove,
+# a domain renamed in .env) while the router is still attached (Fable review,
+# installer#82). The registry is read as well, for an entry Docker no longer
+# labels.
 router_detach_project() {
     docker inspect semitexa-router-proxy >/dev/null 2>&1 || return 0
-    for _rd_entry in "$ROUTER_REGISTRY_DIR"/*.env; do
-        [ -f "$_rd_entry" ] || continue
-        [ "$(sed -n "s/^PROJECT_ROOT=//p" "$_rd_entry" | head -n 1)" = "$PROJECT_ROOT" ] || continue
-        _rd_net="$(sed -n "s/^UPSTREAM_NETWORK=//p" "$_rd_entry" | head -n 1)"
-        [ -n "$_rd_net" ] && docker network disconnect -f "$_rd_net" semitexa-router-proxy >/dev/null 2>&1 || true
+    _rd_compose="$(compose_bin)"
+    # shellcheck disable=SC2086
+    _rd_cid="$($_rd_compose $(compose_args) ps -a -q 2>/dev/null </dev/null | head -n 1 || true)"
+    _rd_proj=''
+    [ -n "$_rd_cid" ] && _rd_proj="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$_rd_cid" 2>/dev/null || true)"
+    _rd_nets="$(sed -n "s/^UPSTREAM_NETWORK=//p" $(grep -lxF "PROJECT_ROOT=$PROJECT_ROOT" "$ROUTER_REGISTRY_DIR"/*.env 2>/dev/null) </dev/null 2>/dev/null || true)"
+    for _rd_net in $(router_proxy_networks || true); do
+        [ "$_rd_net" = "router_default" ] && continue
+        if [ -n "$_rd_proj" ] && [ "$(docker network inspect -f '{{index .Labels "com.docker.compose.project"}}' "$_rd_net" 2>/dev/null || true)" = "$_rd_proj" ]; then
+            _rd_nets="$_rd_nets
+$_rd_net"
+        fi
+    done
+    for _rd_net in $(printf '%s\n' "$_rd_nets" | sed '/^$/d' | sort -u); do
+        docker network disconnect -f "$_rd_net" semitexa-router-proxy >/dev/null 2>&1 || true
     done
     return 0
 }
@@ -1181,6 +1197,11 @@ router_reload_proxy() {
 router_generate_nginx_config() {
     router_ensure_dirs
     _saved_project_root="$PROJECT_ROOT"
+    # Each entry sets COMPOSE_PROJECT_NAME to its own project's, and .env keys
+    # are exported (env_export_compose_context): left as the last entry's, a
+    # compose call after this would run in another project (Fable review,
+    # installer#82).
+    _saved_cpn_set="${COMPOSE_PROJECT_NAME+x}" _saved_cpn="${COMPOSE_PROJECT_NAME:-}"
     cat > "$ROUTER_NGINX_DEFAULT" <<'EOF'
 server {
     listen 80 default_server;
@@ -1233,6 +1254,7 @@ server {
 EOF
     done
     PROJECT_ROOT="$_saved_project_root"
+    if [ -n "$_saved_cpn_set" ]; then COMPOSE_PROJECT_NAME="$_saved_cpn"; else unset COMPOSE_PROJECT_NAME; fi
 }
 
 router_generate_dns_config() {
