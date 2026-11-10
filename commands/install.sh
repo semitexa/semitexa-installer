@@ -117,6 +117,8 @@ cp /installer/scaffold/docker-compose.nats.yml             /app/docker-compose.n
 cp /installer/scaffold/docker-compose.ollama.yml           /app/docker-compose.ollama.yml
 cp /installer/scaffold/docker-compose.worker.yml           /app/docker-compose.worker.yml
 cp /installer/scaffold/docker-compose.test.yml             /app/docker-compose.test.yml
+# The E2E phase's own app: test:run adds this file to point the runner at it.
+cp /installer/scaffold/docker-compose.e2e.yml              /app/docker-compose.e2e.yml
 # What test:run needs to run E2E tests: the runner's image is built here, not pulled.
 mkdir -p /app/docker/e2e-runner
 cp /installer/scaffold/docker/e2e-runner/Dockerfile        /app/docker/e2e-runner/Dockerfile
@@ -195,6 +197,7 @@ chown "${_uid}:${_gid}" \
     /app/docker-compose.ollama.yml \
     /app/docker-compose.worker.yml \
     /app/docker-compose.test.yml \
+    /app/docker-compose.e2e.yml \
     /app/playwright.config.ts \
     /app/docker-compose.override.yml.example \
     /app/.env.default \
