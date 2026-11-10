@@ -1456,10 +1456,17 @@ cmd_local_router_doctor() {
         printf "\n"
         router_compose ps || true
     fi
-    if [ -n "$(router_proxy_published)" ] && router_warn_if_public; then
-        success "The router proxy answers this machine only ($(router_proxy_published))."
-    else
-        [ -z "$(router_proxy_published)" ] || info "Fix: bin/semitexa local-router:restart, after updating the older projects."
+    if [ -n "$(router_proxy_published)" ]; then
+        _check=0
+        router_warn_if_public || _check=$?
+        case "$_check" in
+            # What was checked, not a network boundary: a host routed to the
+            # Docker bridge (allow-direct-routing) reaches the container itself.
+            0) success "The router proxy is published on loopback only ($(router_proxy_published))." ;;
+            1) info "Fix: bin/semitexa local-router:restart, after updating the older projects." ;;
+            # A restart rebinds to 127.0.0.1, which this engine does not keep local.
+            *) info "Fix: upgrade Docker Engine to 28 or later; a restart does not close this." ;;
+        esac
     fi
 
     printf "\n"
