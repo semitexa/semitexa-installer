@@ -1379,12 +1379,27 @@ router_warn_if_public() {
     [ -n "$_published" ] || return "$_rc"
     # An engine that will not say its version (an authorization plugin, a
     # daemon error) is unknown, not new enough: no upgrade advice, no all-clear.
-    _engine="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    _server="$(docker version --format '{{.Server.Platform.Name}}|{{.Server.Version}}' 2>/dev/null || true)"
+    _platform="${_server%%|*}"
+    _engine="${_server#*|}"
+    [ "$_server" != "$_engine" ] || _platform=''
     if [ -z "$_engine" ]; then
         warn "Could not read the Docker Engine version, so it is not known whether 127.0.0.1 keeps the router to this machine (Engine 28 and later do). See: docker version"
         [ "$_rc" -eq 1 ] || _rc=3
         return "$_rc"
     fi
+    # The 28.0 fix is Docker Engine's. Another engine behind the docker CLI
+    # (Podman reports its own version, e.g. 5.4.0) is not measured by that
+    # number, so it is unknown rather than "too old". An empty platform name
+    # is read as Docker: older engines did not report one.
+    case "$_platform" in
+        ''|*Docker*) ;;
+        *)
+            warn "The engine is $_platform $_engine, not Docker Engine: whether 127.0.0.1 keeps the router to this machine is not checked here."
+            [ "$_rc" -eq 1 ] || _rc=3
+            return "$_rc"
+            ;;
+    esac
     case "$_engine" in
         2[8-9].*|[3-9][0-9].*|[1-9][0-9][0-9]*) ;;
         *)
