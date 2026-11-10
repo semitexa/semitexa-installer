@@ -1379,9 +1379,38 @@ router_warn_if_public() {
     [ -n "$_published" ] || return "$_rc"
     # An engine that will not say its version (an authorization plugin, a
     # daemon error) is unknown, not new enough: no upgrade advice, no all-clear.
-    _engine="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    # A CLI too old for Server.Platform fails the whole template: ask for the
+    # version alone then, and let the version decide what the engine is.
+    _server="$(docker version --format '{{.Server.Platform.Name}}|{{.Server.Version}}' 2>/dev/null)" \
+        || _server="|$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+    # The version is the last field (a name may hold a "|"), and only a number
+    # is one: a template error or an empty field is no version.
+    _platform="${_server%|*}"
+    _engine="${_server##*|}"
+    [ "$_server" != "$_engine" ] || _platform=''
+    case "$_engine" in [0-9]*) ;; *) _engine='' ;; esac
     if [ -z "$_engine" ]; then
         warn "Could not read the Docker Engine version, so it is not known whether 127.0.0.1 keeps the router to this machine (Engine 28 and later do). See: docker version"
+        [ "$_rc" -eq 1 ] || _rc=3
+        return "$_rc"
+    fi
+    # The 28.0 fix is Docker Engine's. Another engine behind the docker CLI
+    # (Podman reports its own version, e.g. 5.4.0) is not measured by that
+    # number, so it is unknown rather than "too old". Two signs, either enough:
+    # a platform name without "Docker", or a version Docker Engine never had -
+    # the second holds when an engine reports no platform name at all. Docker
+    # went from 1.13 straight to YY.MM (17.03), so 2.x to 16.x is something
+    # else; 1.x is old Docker (Podman answers the docker CLI only from 2.0).
+    _not_docker=''
+    case "$_platform" in
+        ''|*Docker*) ;;
+        *) _not_docker=1 ;;
+    esac
+    case "$_engine" in
+        [2-9].*|1[0-6].*) _not_docker=1 ;;
+    esac
+    if [ -n "$_not_docker" ]; then
+        warn "The engine is ${_platform:+$_platform }$_engine, not Docker Engine: whether 127.0.0.1 keeps the router to this machine is not checked here."
         [ "$_rc" -eq 1 ] || _rc=3
         return "$_rc"
     fi
@@ -1508,7 +1537,10 @@ cmd_local_router_doctor() {
             *:1) info "Fix: bin/semitexa local-router:restart, after updating the older projects." ;;
             # A restart rebinds to 127.0.0.1, which this engine does not keep local.
             *:2) info "Fix: upgrade Docker Engine to 28 or later; a restart does not close this." ;;
-            *) info "Not checked: the warning above names what docker would not say; run doctor again once it answers." ;;
+            # 3: the warning above says what was not known - docker not
+            # answering (retry once it does) or an engine this check cannot
+            # judge (a retry gives the same answer).
+            *) info "Not checked: see the warning above for what could not be judged." ;;
         esac
     fi
 
