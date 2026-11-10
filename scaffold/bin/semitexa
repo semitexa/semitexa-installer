@@ -3857,6 +3857,9 @@ e2e_app_start() {
     # E2E_APP_START_TIMEOUT gives a slow machine longer.
     _e2e_wait="${E2E_APP_START_TIMEOUT:-90}"
     case "$_e2e_wait" in ''|*[!0-9]*) _e2e_wait=90 ;; esac
+    # Decimal, as written: "08" is not octal to $(( )) (review, installer#81).
+    _e2e_wait="$(printf '%s' "$_e2e_wait" | sed 's/^0*//')"
+    [ -n "$_e2e_wait" ] || _e2e_wait=0
     _e2e_deadline=$(( $(date +%s) + _e2e_wait ))
     while :; do
         # Bounded: an app that takes the connection and never answers cannot hold the wait.
