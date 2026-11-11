@@ -1561,10 +1561,16 @@ router_warn_if_public() {
 # 2026-11-09 reopens port 80 to the network the next time it starts it; this
 # names them before that happens instead of "update each of your projects".
 router_stale_projects() {
-    for _rs_root in $(sed -n 's/^PROJECT_ROOT=//p' "$ROUTER_REGISTRY_DIR"/*.env 2>/dev/null | sort -u); do
-        [ "$_rs_root" = "$PROJECT_ROOT" ] && continue
-        [ -f "$_rs_root/bin/semitexa" ] || continue
-        grep -q '"127.0.0.1:80:80"' "$_rs_root/bin/semitexa" 2>/dev/null || printf '%s\n' "$_rs_root"
+    # The ports line itself, anchored: a plain grep for the address also found
+    # this function's own text, so any script carrying it read as fresh
+    # (Fable review, installer#84). One root per line, spaces kept.
+    sed -n 's/^PROJECT_ROOT=//p' "$ROUTER_REGISTRY_DIR"/*.env 2>/dev/null | sort -u | while IFS= read -r _rs_root; do
+        [ -n "$_rs_root" ] && [ "$_rs_root" != "$PROJECT_ROOT" ] || continue
+        if [ ! -f "$_rs_root/bin/semitexa" ]; then
+            printf '%s (no bin/semitexa: not checked)\n' "$_rs_root"
+        elif ! grep -Eq '^[[:space:]]*- "127\.0\.0\.1:80:80"[[:space:]]*$' "$_rs_root/bin/semitexa" 2>/dev/null; then
+            printf '%s\n' "$_rs_root"
+        fi
     done
     return 0
 }
