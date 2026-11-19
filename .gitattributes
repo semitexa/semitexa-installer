@@ -1,0 +1,12 @@
+# Kept out of the archive Composer installs (--prefer-dist): what only builds
+# and publishes the semitexa/installer image, and the tool that derives the
+# manifest in the framework workspace. A project that has this package in
+# vendor/ reads scaffold/ and resources/scaffold-manifest.json through src/, nothing else.
+#
+# scaffold/ is NOT here, and neither is scaffold/Dockerfile: that one is the
+# project's own Dockerfile. The line below names the image's, at the root.
+/Dockerfile export-ignore
+/entrypoint.sh export-ignore
+/commands export-ignore
+/.github export-ignore
+/tools export-ignore
