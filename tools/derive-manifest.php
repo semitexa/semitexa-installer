@@ -85,9 +85,21 @@ if ($onDisk !== []) {
     $fail("No entry in update's manifest for: " . implode(', ', array_keys($onDisk)) . ' (run bin/semitexa scaffold:sync first).');
 }
 
+// The installer keeps its own generated_at while its entries are what they were.
+// update's changes with every rebuild of any scaffold file, an agent doc among
+// them, and copying it made this manifest stale with nothing of the installer's
+// changed, so a docs edit needed an installer PR too (found 19.11, syncing a
+// paragraph of AGENTS_DOCTRINE.md).
+$generatedAt = $manifest['generated_at'];
+$previous = is_file($target) ? json_decode((string) file_get_contents($target), true) : null;
+if (is_array($previous) && ($previous['files'] ?? null) === $entries && ($previous['schema_version'] ?? null) === $manifest['schema_version']
+    && is_string($previous['generated_at'] ?? null)) {
+    $generatedAt = $previous['generated_at'];
+}
+
 // The same encoding update:scaffold:rebuild writes, so an entry reads the same in both files.
 $json = json_encode(
-    ['schema_version' => $manifest['schema_version'], 'generated_at' => $manifest['generated_at'], 'files' => $entries],
+    ['schema_version' => $manifest['schema_version'], 'generated_at' => $generatedAt, 'files' => $entries],
     JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
 ) . "\n";
 
