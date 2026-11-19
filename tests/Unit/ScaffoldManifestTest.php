@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Installer\Tests\Unit;
 
-use Composer\Autoload\ClassLoader;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\ExpectationFailedException;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Installer\Application\Service\Scaffold;
 
@@ -20,6 +21,8 @@ use Semitexa\Installer\Application\Service\Scaffold;
  */
 final class ScaffoldManifestTest extends TestCase
 {
+    private const SHA256 = '/^[0-9a-f]{64}$/';
+
     public function testTheLocatorPointsAtThisPackagesScaffoldAndManifest(): void
     {
         self::assertSame(\dirname(__DIR__, 2) . '/scaffold', Scaffold::directory());
@@ -47,7 +50,6 @@ final class ScaffoldManifestTest extends TestCase
 
         $stale = [];
         foreach ($entries as $entry) {
-            self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $entry['current_sha256'], $entry['path']);
             $actual = hash_file('sha256', Scaffold::directory() . '/' . $entry['path']);
             if ($actual !== $entry['current_sha256']) {
                 $stale[] = $entry['path'];
@@ -55,6 +57,68 @@ final class ScaffoldManifestTest extends TestCase
         }
 
         self::assertSame([], $stale, 'These files changed without their manifest entry: run bin/semitexa scaffold:sync, then php tools/derive-manifest.php.');
+    }
+
+    /**
+     * The reader every test here goes through refuses a hash that is not one:
+     * with it, an entry would pass every comparison while naming no file.
+     */
+    #[DataProvider('valuesThatAreNotASha256')]
+    public function testAManifestWithAHashThatIsNotASha256IsRefused(string $field, string $value): void
+    {
+        $valid = str_repeat('a', 64);
+        $entry = ['path' => 'bin/semitexa', 'current_sha256' => $valid, 'previous_sha256' => [$valid]];
+        if ($field === 'current_sha256') {
+            $entry['current_sha256'] = $value;
+        } else {
+            $entry['previous_sha256'][] = $value;
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'scaffold-manifest-');
+        self::assertIsString($path);
+        try {
+            file_put_contents($path, json_encode(['files' => [$entry]], JSON_THROW_ON_ERROR));
+            $refusal = null;
+            try {
+                $this->entries($path);
+            } catch (ExpectationFailedException $e) {
+                $refusal = $e->getMessage();
+            }
+        } finally {
+            unlink($path);
+        }
+
+        self::assertNotNull($refusal, "A {$field} of '{$value}' was read as a hash.");
+        self::assertStringContainsString($field, $refusal);
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function valuesThatAreNotASha256(): iterable
+    {
+        foreach (['current_sha256', 'previous_sha256'] as $field) {
+            yield "{$field}: empty" => [$field, ''];
+            yield "{$field}: cut off" => [$field, str_repeat('a', 63)];
+            yield "{$field}: too long" => [$field, str_repeat('a', 65)];
+            yield "{$field}: not hexadecimal" => [$field, str_repeat('g', 64)];
+            yield "{$field}: upper case" => [$field, str_repeat('A', 64)];
+        }
+    }
+
+    public function testAnEntryWithNoHistoryIsRead(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'scaffold-manifest-');
+        self::assertIsString($path);
+        try {
+            file_put_contents($path, json_encode(['files' => [['path' => 'new-file', 'current_sha256' => str_repeat('b', 64), 'previous_sha256' => []]]], JSON_THROW_ON_ERROR));
+            $entries = $this->entries($path);
+        } finally {
+            unlink($path);
+        }
+
+        self::assertCount(1, $entries);
+        self::assertSame([], $entries[0]['previous_sha256']);
     }
 
     /**
@@ -126,10 +190,14 @@ final class ScaffoldManifestTest extends TestCase
             self::assertIsString($entry['path'] ?? null);
             self::assertNotSame('', $entry['path']);
             self::assertIsString($entry['current_sha256'] ?? null, $entry['path']);
+            self::assertMatchesRegularExpression(self::SHA256, $entry['current_sha256'], $entry['path'] . ': current_sha256 is not a sha256.');
             self::assertIsArray($entry['previous_sha256'] ?? null, $entry['path']);
             self::assertTrue(array_is_list($entry['previous_sha256']), $entry['path']);
             foreach ($entry['previous_sha256'] as $hash) {
                 self::assertIsString($hash, $entry['path']);
+                // An empty or cut-off hash identifies no released file, and
+                // the same one in both manifests would still compare equal.
+                self::assertMatchesRegularExpression(self::SHA256, $hash, $entry['path'] . ': previous_sha256 holds a value that is not a sha256.');
             }
             /** @var array{path: string, current_sha256: string, previous_sha256: list<string>}&array<string, mixed> $entry */
             $entries[] = $entry;
@@ -139,23 +207,34 @@ final class ScaffoldManifestTest extends TestCase
     }
 
     /**
-     * semitexa/update's manifest, wherever the autoloader has that package:
-     * a sibling checkout in the workspace, vendor/ elsewhere.
+     * semitexa/update's manifest, in the checkout beside this one: the
+     * framework workspace and the release clone have it at
+     * packages/semitexa-update, a vendor directory at semitexa/update.
+     *
+     * By path, and not through a require-dev on semitexa/update: Composer
+     * would then install the released update, whose manifest is behind this
+     * line after every scaffold edit, and the comparison would fail between
+     * releases with nothing wrong. Only update on the same line is the one to
+     * compare with. Without it the guard has nothing to read, and says so
+     * instead of passing; the tests are kept out of the Composer archive
+     * (.gitattributes), so that is a git checkout standing alone.
      */
     private function updateManifestPath(): string
     {
-        $class = 'Semitexa\\Update\\Application\\Service\\UpdateRunnerFactory';
-        foreach (ClassLoader::getRegisteredLoaders() as $loader) {
-            $file = $loader->findFile($class);
-            if (\is_string($file)) {
-                $real = realpath($file);
-                self::assertIsString($real);
-
-                // <package>/src/Application/Service/UpdateRunnerFactory.php
-                return \dirname($real, 4) . '/resources/scaffold-manifest.json';
+        $beside = \dirname(__DIR__, 3);
+        $candidates = [
+            $beside . '/semitexa-update/resources/scaffold-manifest.json',
+            $beside . '/update/resources/scaffold-manifest.json',
+        ];
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
             }
         }
 
-        self::fail('semitexa/update is not installed: this guard compares the manifest with the one it ships, and has nothing to compare against.');
+        self::fail(
+            "semitexa/update is not checked out beside this package, so the manifest cannot be compared with the one it ships. Looked for:\n  "
+            . implode("\n  ", $candidates),
+        );
     }
 }

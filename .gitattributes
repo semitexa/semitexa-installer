@@ -10,3 +10,8 @@
 /commands export-ignore
 /.github export-ignore
 /tools export-ignore
+# The tests compare this package with the semitexa-update checkout beside it
+# (tests/Unit/ScaffoldManifestTest.php): they belong to a git checkout, where
+# the workspace and the release clone run them. An archive in vendor/ has no
+# such neighbour on the same line.
+/tests export-ignore
