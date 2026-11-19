@@ -154,6 +154,31 @@ final class ScaffoldManifestTest extends TestCase
     }
 
     /**
+     * update's manifest gets a new generated_at on every rebuild of any scaffold
+     * file, an agent doc among them. The derive tool copied it, so this manifest
+     * went stale with nothing of the installer's changed, and a docs edit needed
+     * an installer PR too (found 19.11). A newer generated_at alone changes nothing here.
+     */
+    public function testANewerGeneratedAtInUpdatesManifestAloneLeavesThisOneCurrent(): void
+    {
+        $theirs = json_decode((string) file_get_contents($this->updateManifestPath()), true);
+        self::assertIsArray($theirs);
+        $theirs['generated_at'] = '2099-01-01T00:00:00+00:00';
+        $source = tempnam(sys_get_temp_dir(), 'update-manifest-');
+        self::assertIsString($source);
+        file_put_contents($source, json_encode($theirs, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n");
+
+        try {
+            exec(sprintf('%s %s --check --from=%s 2>&1', escapeshellarg(PHP_BINARY), escapeshellarg(\dirname(__DIR__, 2) . '/tools/derive-manifest.php'), escapeshellarg($source)), $output, $status);
+        } finally {
+            unlink($source);
+        }
+
+        self::assertSame(0, $status, implode("\n", $output));
+        self::assertStringContainsString('is current', implode("\n", $output));
+    }
+
+    /**
      * @return list<string> paths relative to scaffold/, sorted
      */
     private function scaffoldFiles(): array
