@@ -48,7 +48,14 @@ jobs:
         # image. CalVer tags sort by name (YYYY.MM.DD.HHMM); a beta (-beta)
         # never counts.
         run: |
-          newest=$(git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" '20*' | sed 's#.*refs/tags/##' | grep -v -e '-' | sort | tail -n 1)
+          # The lookup on its own: in a pipe its failure was hidden (no pipefail),
+          # and an empty answer published the release without moving `latest`
+          # (review, installer#120). An empty stable list stays valid: a beta.
+          if ! tags=$(git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" '20*'); then
+            echo "::error::could not list the release tags of ${GITHUB_REPOSITORY}"
+            exit 1
+          fi
+          newest=$(printf '%s\n' "$tags" | sed 's#.*refs/tags/##' | grep -v -e '-' | sort | tail -n 1)
           echo "newest stable release tag: ${newest:-none}, this one: ${GITHUB_REF_NAME}"
           if [ -n "$newest" ] && [ "$newest" = "$GITHUB_REF_NAME" ]; then
             echo "moves_latest=true" >> "$GITHUB_OUTPUT"
