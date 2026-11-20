@@ -257,6 +257,16 @@ final class CheckManifestToolTest extends TestCase
     public function testThisLineKeepsEveryHashOfTheLastTag(): void
     {
         $package = \dirname(__DIR__, 2);
+        // ultimate's stack smoke fetches one commit of each package (fetch --depth 1),
+        // so its checkout has no tags to compare with; the release stage
+        // installer-manifest-fresh checks the history there. A full checkout
+        // without tags is a checkout that was not fetched, and fails below.
+        exec(sprintf('git -C %s rev-parse --is-shallow-repository 2>&1', escapeshellarg($package)), $shallow, $status);
+        self::assertSame(0, $status, 'git could not read ' . $package . ': ' . implode("\n", $shallow));
+        if (trim($shallow[0] ?? '') === 'true') {
+            // verify:accept-test-change a shallow checkout (ultimate's stack smoke) has no tags to compare with; the release stage checks the history against the last tag
+            self::markTestSkipped('A shallow checkout holds no release tags: the release stage installer-manifest-fresh checks the history against the last tag.');
+        }
         exec(sprintf('git -C %s tag -l %s --sort=-version:refname 2>&1', escapeshellarg($package), escapeshellarg('20*')), $tags, $status);
         self::assertSame(0, $status, 'git could not list the tags of ' . $package . ': ' . implode("\n", $tags));
         self::assertNotSame([], $tags, 'This checkout has no release tags: fetch them (git fetch --tags) to check the history against the last release.');
