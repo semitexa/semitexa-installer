@@ -226,32 +226,49 @@ foreach (array_keys($known) as $path) {
     }
 }
 
-// Nothing the earlier manifest knew is forgotten.
+// Nothing the earlier manifest knew is forgotten: neither a file it listed nor
+// one it retired. A retirement dropped later would leave every project that
+// still has a shipped copy of that file with it forever (review, installer#118).
 if ($previousPath !== null) {
     $previous = $readJson($previousPath);
     $previousFiles = $previous['files'] ?? null;
-    if (!is_array($previousFiles)) {
-        $cannotRead("No files list in {$previousPath}");
+    $previousRetired = $previous['retired'] ?? [];
+    if (!is_array($previousFiles) || !is_array($previousRetired)) {
+        $cannotRead("No files list, or a retired section that is not a list, in {$previousPath}");
     }
+    /** @var list<array{string, mixed, string}> $earlier path, the hashes it had, and how the earlier manifest held it */
+    $earlier = [];
     foreach ($previousFiles as $entry) {
         if (!is_array($entry) || !is_string($entry['path'] ?? null)) {
             $cannotRead("An entry without a path in {$previousPath}");
         }
-        $path = $entry['path'];
+        $earlier[] = [$entry['path'], [$entry['current_sha256'] ?? null, ...(is_array($entry['previous_sha256'] ?? null) ? $entry['previous_sha256'] : [])], 'lists'];
+    }
+    foreach ($previousRetired as $entry) {
+        if (!is_array($entry) || !is_string($entry['path'] ?? null)) {
+            $cannotRead("A retired entry without a path in {$previousPath}");
+        }
+        $earlier[] = [$entry['path'], is_array($entry['shipped_sha256'] ?? null) ? $entry['shipped_sha256'] : [], 'retires'];
+    }
+    foreach ($earlier as [$path, $hashes, $how]) {
         $nowKnown = $known[$path] ?? $retired[$path] ?? null;
         if ($nowKnown === null) {
-            $findings[] = "{$path}: the earlier manifest lists it and this one neither lists nor retires it; a project would keep its copy forever.";
+            $findings[] = $how === 'lists'
+                ? "{$path}: the earlier manifest lists it and this one neither lists nor retires it; a project would keep its copy forever."
+                : "{$path}: the earlier manifest retires it and this one neither retires nor lists it; a project's shipped copy would never be removed.";
             continue;
         }
         $was = [];
-        foreach ([$entry['current_sha256'] ?? null, ...(is_array($entry['previous_sha256'] ?? null) ? $entry['previous_sha256'] : [])] as $hash) {
+        foreach (is_array($hashes) ? $hashes : [] as $hash) {
             $earlierHash = $sha256($hash);
             if ($earlierHash !== null) {
                 $was[] = $earlierHash;
             }
         }
         foreach (array_diff($was, $nowKnown) as $lost) {
-            $findings[] = "{$path}: {$lost} was known to the earlier manifest and is not any more; a project on that version would be told it edited the file.";
+            $findings[] = $how === 'lists'
+                ? "{$path}: {$lost} was known to the earlier manifest and is not any more; a project on that version would be told it edited the file."
+                : "{$path}: {$lost} was a retired version in the earlier manifest and is not any more; a project's copy at that version would never be removed.";
         }
     }
 }

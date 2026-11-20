@@ -193,6 +193,39 @@ final class CheckManifestToolTest extends TestCase
         self::assertStringContainsString("docker-compose.nats.yml: {$shipped[0]} was known to the earlier manifest and is not any more", $output);
     }
 
+    /**
+     * Review on installer#118: the comparison read only the earlier `files`. A
+     * retirement the earlier manifest made, dropped later, passed, and every
+     * project with a shipped copy of that file would have kept it.
+     */
+    public function testARetirementTheEarlierManifestMadeIsKeptWithEveryVersion(): void
+    {
+        $retired = [str_repeat('d', 64), str_repeat('e', 64)];
+        $retire = static function (array $hashes): \Closure {
+            return static function (array $m) use ($hashes): array {
+                $m['retired'] = [['path' => 'docker-compose.legacy.yml', 'shipped_sha256' => $hashes]];
+                return $m;
+            };
+        };
+        self::edit($this->root, $retire($retired));
+        $earlier = $this->root . '/earlier.json';
+        copy($this->root . '/resources/scaffold-manifest.json', $earlier);
+
+        [$status, $output] = $this->check('--previous=' . $earlier);
+        self::assertSame(0, $status, 'an unchanged retirement holds: ' . $output);
+
+        // The cases' reader keeps no retired section: the edit drops it.
+        self::edit($this->root, static fn (array $m): array => $m);
+        [$status, $output] = $this->check('--previous=' . $earlier);
+        self::assertSame(1, $status, $output);
+        self::assertStringContainsString('docker-compose.legacy.yml: the earlier manifest retires it and this one neither retires nor lists it', $output);
+
+        self::edit($this->root, $retire([$retired[0]]));
+        [$status, $output] = $this->check('--previous=' . $earlier);
+        self::assertSame(1, $status, $output);
+        self::assertStringContainsString("docker-compose.legacy.yml: {$retired[1]} was a retired version in the earlier manifest and is not any more", $output);
+    }
+
     public function testARetiredPathTheScaffoldStillShipsIsRefused(): void
     {
         self::edit($this->root, static function (array $m): array {
