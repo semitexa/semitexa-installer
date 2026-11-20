@@ -1,0 +1,16 @@
+{
+    "_": "This package's share of the Semitexa quality ledger: lower is better. Written only by `bin/semitexa ai:quality`; do not edit by hand.",
+    "metrics": {
+        "tests.skip-calls": {
+            "count": 1,
+            "accepted": [
+                {
+                    "at": "2026-11-20",
+                    "from": 0,
+                    "to": 1,
+                    "reason": "CheckManifestToolTest (semitexa-installer) skips its history check in a shallow checkout: ultimate's stack smoke fetches one commit of each package, so there are no release tags to compare with; the release stage installer-manifest-fresh checks the history against the last tag (found on semitexa-ultimate#172)"
+                }
+            ]
+        }
+    }
+}
