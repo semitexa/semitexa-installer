@@ -62,11 +62,13 @@ final class RegistryLockTest extends TestCase
             . 'sh "$T/holder.sh" >/dev/null 2>&1 & holder=$!; await ready' . "\n"
             . 'SEMITEXA_REGISTRY_LOCK_WAIT=1' . "\n"
             // As local-app:register runs it: under set -e.
-            . '( set -e; local_app_register_logic app-123456 "" /home/dev/app; echo "went on" ) | sed "s/process $holder)/process HOLDER)/"; ' . "\n"
-            . '[ -d "$LOCK" ] && echo "still held"; kill "$holder"',
+            . '( set -e; local_app_register_logic app-123456 "" /home/dev/app; echo "went on" ) > "$T/said"; echo "exit=$?"' . "\n"
+            . 'sed "s/process $holder)/process HOLDER)/" "$T/said"; [ -d "$LOCK" ] && echo "still held"; kill "$holder"',
         );
 
         self::assertSame([
+            // 75: it was the lock, which a start stops on.
+            'exit=75',
             'ERROR The local app registry is locked by another bin/semitexa run (process HOLDER) and stayed locked for 1 s, so nothing was registered. '
             . 'Run this again when that run has ended; the lock is ' . $this->tmp . '/locks/registry.lock.',
             'still held',
@@ -219,6 +221,75 @@ final class RegistryLockTest extends TestCase
         );
 
         self::assertSame(['not at once', 'left', 'taken', 'held=[1]', 'free'], $out);
+    }
+
+    /**
+     * Review, installer#122: the registry stayed locked, nothing was registered,
+     * and the start went on with the port in .env, which may be free and another
+     * project's. The reconcile says it was the lock, and the start stops.
+     */
+    #[Test]
+    public function a_start_stops_when_the_registry_stayed_locked(): void
+    {
+        mkdir($this->tmp . '/app');
+        touch($this->tmp . '/app/.env');
+        touch($this->tmp . '/app/docker-compose.yml');
+        $out = $this->shell(
+            'PROJECT_ROOT="$T/app"; C_BOLD=; C_CYAN=; C_RESET=' . "\n"
+            . 'info() { printf "INFO %s\n" "$*"; }; warn() { printf "WARN %s\n" "$*"; }; error() { printf "ERROR %s\n" "$*"; }' . "\n"
+            . 'env_val() { case "$1" in SWOOLE_PORT) printf 9502 ;; SEMITEXA_APP_ID) printf app-123456 ;; *) printf "%s" "$2" ;; esac; }' . "\n"
+            . 'router_lock_acquire() { return 1; }; local_app_drop_earlier_ids() { :; }' . "\n"
+            . 'local_app_register_logic() { return "$REGISTERS"; }' . "\n"
+            . 'stack_event() { echo "went on to start"; exit 0; }' . "\n"
+            . self::function('local_app_reconcile') . "\n" . self::function('cmd_server_start') . "\n"
+            . 'REGISTERS=75; ( cmd_server_start ) | grep -v Starting; ( set -e; local_app_reconcile ); echo "reconcile=$?"' . "\n"
+            // Any other failure, as no free port: said, and the start goes on as it did.
+            . 'REGISTERS=1; ( cmd_server_start ) | grep -v Starting',
+        );
+
+        self::assertSame([
+            "ERROR Not started: this project's port could not be recorded while the local app registry is locked. Run bin/semitexa server:start again.",
+            'reconcile=75',
+            'WARN Local app registry could not assign a Swoole port; keeping existing value.',
+            'WARN Local app reconcile reported a problem; continuing with current .env.',
+            'went on to start',
+        ], $out);
+    }
+
+    /** Review, installer#122: with 08 the shell stopped the whole script on "illegal number", and read 010 as eight. */
+    #[Test]
+    public function seconds_with_a_leading_zero_are_decimal(): void
+    {
+        $out = $this->shell(
+            'SEMITEXA_REGISTRY_LOCK_WAIT=08; SEMITEXA_REGISTRY_LOCK_OWNERLESS_GRACE=009' . "\n"
+            . 'router_lock_acquire && echo "taken"; echo "tries=$_rl_tries grace=$_rl_grace"; router_lock_release' . "\n"
+            . 'SEMITEXA_REGISTRY_LOCK_WAIT=010; SEMITEXA_REGISTRY_LOCK_OWNERLESS_GRACE=0; router_lock_acquire; echo "tries=$_rl_tries grace=$_rl_grace"',
+        );
+
+        self::assertSame(['taken', 'tries=80 grace=90', 'tries=100 grace=1'], $out);
+    }
+
+    /**
+     * A run renames an owner file away as its claim, and a lock with no owner
+     * is not taken while a claim's run lives. Review, installer#122: a claim
+     * left by a killed run kept the lock from everyone for as long as any
+     * process had that pid. The claim's name says when its run started.
+     */
+    #[Test]
+    public function a_claim_protects_the_lock_only_while_the_run_that_made_it_lives(): void
+    {
+        $out = $this->shell(
+            'sleep 60 >/dev/null 2>&1 & other=$!' . "\n"
+            . 'mkdir "$LOCK"; SEMITEXA_REGISTRY_LOCK_OWNERLESS_GRACE=1; SEMITEXA_REGISTRY_LOCK_WAIT=2' . "\n"
+            // The first try defines what reads a process's start.
+            . 'router_lock_acquire 1; : > "$LOCK/claim.$other.$(_rl_started "$other")"' . "\n"
+            . 'router_lock_acquire && echo "taken" || echo "left to the run that claims"' . "\n"
+            // The same pid, started at another time: another process.
+            . 'mv "$LOCK"/claim.* "$LOCK/claim.$other.t1"' . "\n"
+            . 'router_lock_acquire && echo "taken" || echo "refused"; kill "$other"',
+        );
+
+        self::assertSame(['left to the run that claims', 'taken'], $out);
     }
 
     /** Runs that wait for the lock, work under it for a moment and say so; "two at once" when another is at work. */
