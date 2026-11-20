@@ -21,6 +21,7 @@ use Semitexa\Installer\Application\Service\Scaffold;
  */
 final class ScaffoldManifestTest extends TestCase
 {
+    // verify:accept-test-change the comparison with semitexa/update's manifest ends with update's step 2b: update ships none of these entries now, and CheckManifestToolTest checks this manifest and its history against the last release tag
     private const SHA256 = '/^[0-9a-f]{64}$/';
 
     public function testTheLocatorPointsAtThisPackagesScaffoldAndManifest(): void
@@ -40,7 +41,7 @@ final class ScaffoldManifestTest extends TestCase
         $paths = array_column($this->entries(Scaffold::manifestPath()), 'path');
         sort($paths);
 
-        self::assertSame($files, $paths, 'scaffold-manifest.json and scaffold/ name different files: run php tools/derive-manifest.php after bin/semitexa scaffold:sync.');
+        self::assertSame($files, $paths, 'scaffold-manifest.json and scaffold/ name different files: run bin/semitexa scaffold:sync, which rebuilds the manifest.');
     }
 
     public function testEveryEntryCarriesTheHashItsFileHasNow(): void
@@ -56,7 +57,7 @@ final class ScaffoldManifestTest extends TestCase
             }
         }
 
-        self::assertSame([], $stale, 'These files changed without their manifest entry: run bin/semitexa scaffold:sync, then php tools/derive-manifest.php.');
+        self::assertSame([], $stale, 'These files changed without their manifest entry: run bin/semitexa scaffold:sync, which rebuilds the manifest.');
     }
 
     /**
@@ -122,63 +123,6 @@ final class ScaffoldManifestTest extends TestCase
     }
 
     /**
-     * The transition guard. Until semitexa/update reads this package's manifest
-     * (step 2 of tk-one-source-for-bin-semitexa), update's own is what projects
-     * are updated from, and this one must say the same about every scaffold
-     * file: same history, in the same order, same policy fields. It goes away
-     * with update's resources/scaffold-manifest.json.
-     */
-    public function testEveryEntryIsTheOneSemitexaUpdateShips(): void
-    {
-        $ours = $this->entries(Scaffold::manifestPath());
-        $theirs = [];
-        foreach ($this->entries($this->updateManifestPath()) as $entry) {
-            $theirs[$entry['path']] = $entry;
-        }
-
-        $historyHashes = 0;
-        foreach ($ours as $entry) {
-            $path = $entry['path'];
-            self::assertArrayHasKey($path, $theirs, "{$path} has no entry in semitexa/update's manifest.");
-            self::assertSame($theirs[$path]['previous_sha256'], $entry['previous_sha256'], "{$path}: the history differs from the one semitexa/update ships.");
-            self::assertSame($theirs[$path], $entry, "{$path}: the entry differs from the one semitexa/update ships.");
-            $historyHashes += \count($entry['previous_sha256']);
-        }
-
-        // bin/semitexa alone has shipped in dozens of versions: a history that
-        // came out empty on both sides would otherwise compare equal.
-        self::assertGreaterThan(100, $historyHashes, 'The history is all but empty: it was regenerated, not carried over.');
-        $bin = $theirs['bin/semitexa'] ?? null;
-        self::assertNotNull($bin);
-        self::assertGreaterThan(10, \count($bin['previous_sha256']), 'bin/semitexa has almost no history.');
-    }
-
-    /**
-     * update's manifest gets a new generated_at on every rebuild of any scaffold
-     * file, an agent doc among them. The derive tool copied it, so this manifest
-     * went stale with nothing of the installer's changed, and a docs edit needed
-     * an installer PR too (found 19.11). A newer generated_at alone changes nothing here.
-     */
-    public function testANewerGeneratedAtInUpdatesManifestAloneLeavesThisOneCurrent(): void
-    {
-        $theirs = json_decode((string) file_get_contents($this->updateManifestPath()), true);
-        self::assertIsArray($theirs);
-        $theirs['generated_at'] = '2099-01-01T00:00:00+00:00';
-        $source = tempnam(sys_get_temp_dir(), 'update-manifest-');
-        self::assertIsString($source);
-        file_put_contents($source, json_encode($theirs, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) . "\n");
-
-        try {
-            exec(sprintf('%s %s --check --from=%s 2>&1', escapeshellarg(PHP_BINARY), escapeshellarg(\dirname(__DIR__, 2) . '/tools/derive-manifest.php'), escapeshellarg($source)), $output, $status);
-        } finally {
-            unlink($source);
-        }
-
-        self::assertSame(0, $status, implode("\n", $output));
-        self::assertStringContainsString('is current', implode("\n", $output));
-    }
-
-    /**
      * @return list<string> paths relative to scaffold/, sorted
      */
     private function scaffoldFiles(): array
@@ -229,37 +173,5 @@ final class ScaffoldManifestTest extends TestCase
         }
 
         return $entries;
-    }
-
-    /**
-     * semitexa/update's manifest, in the checkout beside this one: the
-     * framework workspace and the release clone have it at
-     * packages/semitexa-update, a vendor directory at semitexa/update.
-     *
-     * By path, and not through a require-dev on semitexa/update: Composer
-     * would then install the released update, whose manifest is behind this
-     * line after every scaffold edit, and the comparison would fail between
-     * releases with nothing wrong. Only update on the same line is the one to
-     * compare with. Without it the guard has nothing to read, and says so
-     * instead of passing; the tests are kept out of the Composer archive
-     * (.gitattributes), so that is a git checkout standing alone.
-     */
-    private function updateManifestPath(): string
-    {
-        $beside = \dirname(__DIR__, 3);
-        $candidates = [
-            $beside . '/semitexa-update/resources/scaffold-manifest.json',
-            $beside . '/update/resources/scaffold-manifest.json',
-        ];
-        foreach ($candidates as $candidate) {
-            if (is_file($candidate)) {
-                return $candidate;
-            }
-        }
-
-        self::fail(
-            "semitexa/update is not checked out beside this package, so the manifest cannot be compared with the one it ships. Looked for:\n  "
-            . implode("\n  ", $candidates),
-        );
     }
 }
