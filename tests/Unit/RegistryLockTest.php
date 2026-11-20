@@ -148,13 +148,7 @@ final class RegistryLockTest extends TestCase
     #[Test]
     public function runs_that_find_a_dead_lock_work_one_at_a_time(): void
     {
-        $this->actor('worker', 'SEMITEXA_REGISTRY_LOCK_WAIT=20' . "\n"
-            . 'until [ -e "$T/start" ]; do :; done' . "\n"
-            . 'if router_lock_acquire; then' . "\n"
-            . '    [ -n "$ROUTER_LOCK_HELD" ] || echo "unlocked" >> "$T/log"' . "\n"
-            . '    mkdir "$T/busy" 2>/dev/null || echo "two at once" >> "$T/log"' . "\n"
-            . '    sleep 0.05; rmdir "$T/busy" 2>/dev/null; echo "worked" >> "$T/log"; router_lock_release' . "\n"
-            . 'else echo "refused" >> "$T/log"; fi');
+        $this->workers();
         $out = $this->shell(
             'sh "$T/killed.sh"' . "\n"
             . 'for n in 1 2 3 4 5 6; do sh "$T/worker.sh" >/dev/null 2>&1 & done' . "\n"
@@ -162,6 +156,50 @@ final class RegistryLockTest extends TestCase
         );
 
         self::assertSame(['worked', 'worked', 'worked', 'worked', 'worked', 'worked', 'free'], $out);
+    }
+
+    /**
+     * The same from a lock with no owner file, where every waiting run reaches
+     * the grace at about the same moment. A run that had read "no owner" removed
+     * the owner file another had just written, and both held the lock (review
+     * of installer 30fcefd: two holders in 34 runs of 40).
+     */
+    #[Test]
+    public function runs_that_find_a_lock_with_no_owner_work_one_at_a_time(): void
+    {
+        $this->workers();
+        $out = $this->shell(
+            'mkdir "$LOCK"' . "\n"
+            // Twelve: with six, one run in three got through the old takeover with nobody meeting.
+            . 'for n in 1 2 3 4 5 6 7 8 9 10 11 12; do sh "$T/worker.sh" >/dev/null 2>&1 & done' . "\n"
+            . 'sleep 0.2; touch "$T/start"; wait; sort "$T/log" | uniq -c | sed "s/^ *//"; [ -d "$LOCK" ] && echo held || echo free',
+        );
+
+        self::assertSame(['12 worked', 'free'], $out);
+    }
+
+    /**
+     * That race, made to happen: this run reads "no owner", and before it takes
+     * the lock over another run's owner file is there. The lock asks ls for the
+     * directory between the two, so ls is where the other run gets in, at the
+     * look that ends a grace of 1 s.
+     */
+    #[Test]
+    public function an_owner_written_after_this_run_read_none_is_kept(): void
+    {
+        $out = $this->shell(
+            'sleep 60 >/dev/null 2>&1 & other=$!' . "\n"
+            . 'ls() {' . "\n"
+            . '    echo look >> "$T/looks"' . "\n"
+            . '    if [ "$(wc -l < "$T/looks" | tr -d " ")" = 11 ]; then printf "%s|%s|.\n" "$other" "$(_rl_started "$other")" > "$T/owner" && mv "$T/owner" "$LOCK/owner"; fi' . "\n"
+            . '    command ls "$@"' . "\n"
+            . '}' . "\n"
+            . 'mkdir "$LOCK"; SEMITEXA_REGISTRY_LOCK_OWNERLESS_GRACE=1; SEMITEXA_REGISTRY_LOCK_WAIT=2' . "\n"
+            . 'router_lock_acquire && echo "taken" || echo "refused"; echo "held=[$ROUTER_LOCK_HELD]"' . "\n"
+            . 'IFS="|" read -r pid rest < "$LOCK/owner"; [ "$pid" = "$other" ] && echo "the other run still owns it"; kill "$other"',
+        );
+
+        self::assertSame(['refused', 'held=[]', 'the other run still owns it'], $out);
     }
 
     /**
@@ -181,6 +219,18 @@ final class RegistryLockTest extends TestCase
         );
 
         self::assertSame(['not at once', 'left', 'taken', 'held=[1]', 'free'], $out);
+    }
+
+    /** Runs that wait for the lock, work under it for a moment and say so; "two at once" when another is at work. */
+    private function workers(): void
+    {
+        $this->actor('worker', 'SEMITEXA_REGISTRY_LOCK_WAIT=20; SEMITEXA_REGISTRY_LOCK_OWNERLESS_GRACE=1' . "\n"
+            . 'until [ -e "$T/start" ]; do :; done' . "\n"
+            . 'if router_lock_acquire; then' . "\n"
+            . '    [ -n "$ROUTER_LOCK_HELD" ] || echo "unlocked" >> "$T/log"' . "\n"
+            . '    mkdir "$T/busy" 2>/dev/null || echo "two at once" >> "$T/log"' . "\n"
+            . '    sleep 0.05; rmdir "$T/busy" 2>/dev/null; echo "worked" >> "$T/log"; router_lock_release' . "\n"
+            . 'else echo "refused" >> "$T/log"; fi');
     }
 
     private function actor(string $name, string $body): void
