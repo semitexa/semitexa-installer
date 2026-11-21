@@ -151,6 +151,17 @@ final class WorkerRunsAsOneProcessTest extends TestCase
         ]), 'a worker:run someone started by hand in the container is not what docker stop and HUP reach');
         self::assertSame(1, $this->probe([
             1 => [0, $init],
+            6 => [1, $script],
+            12 => [6, "php\0-d\0memory_limit=512M\0vendor/bin/semitexa\0queue:work\0nats\0events\0"],
+            40 => [1, "php\0vendor/bin/semitexa\0worker:run\0"],
+        ]), 'a worker:run started by hand whose shell ended is adopted by the init: beside the shell loops it is still not what HUP reaches');
+        self::assertSame(0, $this->probe([
+            1 => [0, $init],
+            7 => [1, "php\0vendor/bin/semitexa\0worker:run\0"],
+            9 => [1, ''],
+        ]), 'a child of the init with no command line (a zombie on its way out) is not counted');
+        self::assertSame(1, $this->probe([
+            1 => [0, $init],
             7 => [1, "php\0vendor/bin/semitexa\0worker:processes\0"],
         ]));
     }

@@ -3401,16 +3401,28 @@ server_restart_build_or_warn() {
 # when the process docker started there (pid 1, or the one child of the
 # container's init) is php running `vendor/bin/semitexa worker:run`. The
 # shell loops quote that command in their script text, so the line must BE the
-# php: its first word is php, its last two the command. No single quotes here.
+# php: its first word is php, its last two the command. The init's child must
+# also be its only one: a worker:run started by hand whose shell ended is
+# adopted by the init too, and beside the shell loops it is not what HUP
+# reaches (review semitexa-installer#129). No single quotes here.
 WORKER_RUN_PROBE='
-for p in "$1"/[0-9]*; do
-    [ -r "$p/cmdline" ] || continue
-    [ "${p##*/}" = 1 ] || grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null || continue
-    c=$(tr "\000" " " < "$p/cmdline" 2>/dev/null)
-    case "$c" in
-        php\ *"vendor/bin/semitexa worker:run "|*/php\ *"vendor/bin/semitexa worker:run ") exit 0 ;;
+runs_worker_run() {
+    case "$(tr "\000" " " < "$1/cmdline" 2>/dev/null)" in
+        php\ *"vendor/bin/semitexa worker:run "|*/php\ *"vendor/bin/semitexa worker:run ") return 0 ;;
     esac
+    return 1
+}
+runs_worker_run "$1/1" && exit 0
+children=0
+found=1
+for p in "$1"/[0-9]*; do
+    [ "${p##*/}" = 1 ] && continue
+    grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null || continue
+    [ -n "$(tr -d "\000" < "$p/cmdline" 2>/dev/null)" ] || continue
+    children=$((children + 1))
+    runs_worker_run "$p" && found=0
 done
+[ "$children" = 1 ] && exit "$found"
 exit 1
 '
 worker_container_runs_worker_run() {
