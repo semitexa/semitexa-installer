@@ -158,8 +158,19 @@ final class WorkerRunsAsOneProcessTest extends TestCase
         self::assertSame(0, $this->probe([
             1 => [0, $init],
             7 => [1, "php\0vendor/bin/semitexa\0worker:run\0"],
-            9 => [1, ''],
-        ]), 'a child of the init with no command line (a zombie on its way out) is not counted');
+            9 => [1, '', 900, 'Z'],
+        ]), 'a zombie the init has not reaped yet is not the child it started');
+        self::assertSame(0, $this->probe([
+            1 => [0, $init],
+            7 => [1, "php\0vendor/bin/semitexa\0worker:run\0"],
+            11 => [7, "semitexa queue:work nats events\0"],
+            50 => [1, "sleep\0600\0", 5000],
+        ]), 'a background job of a docker exec, adopted by the init, beside the worker:run the init started');
+        self::assertSame(1, $this->probe([
+            1 => [0, $init],
+            48 => [1, "php\0vendor/bin/semitexa\0worker:run\0", 5000],
+            60 => [1, $script, 100],
+        ]), 'the child the init started first is the one docker started, whatever the pid order');
         self::assertSame(1, $this->probe([
             1 => [0, $init],
             7 => [1, "php\0vendor/bin/semitexa\0worker:processes\0"],
@@ -244,7 +255,8 @@ final class WorkerRunsAsOneProcessTest extends TestCase
     /**
      * WORKER_RUN_PROBE on a process table written as /proc holds one.
      *
-     * @param array<int, array{int, string}> $processes pid => [parent pid, cmdline as /proc gives it]
+     * @param array<int, array{0: int, 1: string, 2?: int, 3?: string}> $processes pid => [parent pid,
+     *        cmdline as /proc gives it, start time (default: in pid order), state (default S)]
      * @return int the probe's exit code: 0 when the container runs worker:run
      */
     private function probe(array $processes): int
@@ -253,10 +265,15 @@ final class WorkerRunsAsOneProcessTest extends TestCase
         self::assertSame(1, preg_match("/^WORKER_RUN_PROBE='\n(.*?)^'$/ms", $script, $m), 'WORKER_RUN_PROBE must exist in bin/semitexa');
         $proc = $this->tmp . '/proc-' . bin2hex(random_bytes(4));
         mkdir($proc . '/self', 0o777, true);
-        foreach ($processes as $pid => [$parent, $cmdline]) {
+        foreach ($processes as $pid => $process) {
+            [$parent, $cmdline] = $process;
+            $start = $process[2] ?? $pid * 100;
+            $state = $process[3] ?? 'S';
             mkdir("{$proc}/{$pid}");
             file_put_contents("{$proc}/{$pid}/cmdline", $cmdline);
             file_put_contents("{$proc}/{$pid}/status", "Name:\tx\nPid:\t{$pid}\nPPid:\t{$parent}\n");
+            // As the kernel writes it: a command name with a space and a parenthesis in it is legal.
+            file_put_contents("{$proc}/{$pid}/stat", "{$pid} (a b) c) {$state} {$parent} 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 {$start} 1 1\n");
         }
         exec('env -i PATH=/usr/bin:/bin sh -c ' . escapeshellarg($m[1] ?? 'exit 9') . ' sh ' . escapeshellarg($proc) . ' 2>&1', $output, $code);
         self::assertSame([], $output, 'the probe prints nothing');

@@ -3398,13 +3398,15 @@ server_restart_build_or_warn() {
 # container with its jobs half done. So the container is asked what it runs.
 
 # Run in the worker container as `sh -c "$WORKER_RUN_PROBE" sh /proc`: exit 0
-# when the process docker started there (pid 1, or the one child of the
-# container's init) is php running `vendor/bin/semitexa worker:run`. The
-# shell loops quote that command in their script text, so the line must BE the
-# php: its first word is php, its last two the command. The init's child must
-# also be its only one: a worker:run started by hand whose shell ended is
-# adopted by the init too, and beside the shell loops it is not what HUP
-# reaches (review semitexa-installer#129). No single quotes here.
+# when the process docker started there is php running
+# `vendor/bin/semitexa worker:run`. That process is pid 1 itself, or the child
+# the container's init started: of the init's children, the one that started
+# first, since whatever the init adopts later (a worker:run started by hand
+# whose shell ended, a background job of a docker exec) started after it, and
+# a HUP re-exec keeps both its pid and its start time (reviews
+# semitexa-installer#129). The shell loops quote the command in their script
+# text, so the line must BE the php: its first word is php, its last two the
+# command. No single quotes here.
 WORKER_RUN_PROBE='
 runs_worker_run() {
     case "$(tr "\000" " " < "$1/cmdline" 2>/dev/null)" in
@@ -3412,18 +3414,23 @@ runs_worker_run() {
     esac
     return 1
 }
-runs_worker_run "$1/1" && exit 0
-children=0
-found=1
-for p in "$1"/[0-9]*; do
+proc=$1
+runs_worker_run "$proc/1" && exit 0
+first=
+first_start=
+for p in "$proc"/[0-9]*; do
     [ "${p##*/}" = 1 ] && continue
-    grep -q "^PPid:[[:space:]]*1$" "$p/status" 2>/dev/null || continue
-    [ -n "$(tr -d "\000" < "$p/cmdline" 2>/dev/null)" ] || continue
-    children=$((children + 1))
-    runs_worker_run "$p" && found=0
+    stat=$(cat "$p/stat" 2>/dev/null) || continue
+    # The fields after the command name: state, parent, ... start time 20th.
+    set -- ${stat##*) }
+    [ "$#" -ge 20 ] && [ "$2" = 1 ] && [ "$1" != Z ] || continue
+    shift 19
+    if [ -z "$first" ] || [ "$1" -lt "$first_start" ]; then
+        first=$p
+        first_start=$1
+    fi
 done
-[ "$children" = 1 ] && exit "$found"
-exit 1
+[ -n "$first" ] && runs_worker_run "$first"
 '
 worker_container_runs_worker_run() {
     docker exec "$1" sh -c "$WORKER_RUN_PROBE" sh /proc >/dev/null 2>&1
