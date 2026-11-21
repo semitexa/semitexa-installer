@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-19T07:04:47+00:00",
+    "generated_at": "2026-11-21T02:57:58+00:00",
     "files": [
         {
             "path": ".claude/skills/make-it/SKILL.md",
@@ -106,8 +106,9 @@
         },
         {
             "path": "Dockerfile",
-            "current_sha256": "2ee5379db44835c02cebf2c2f1929dd253fa243837e45d2795af457e7d9de1c1",
+            "current_sha256": "5154535148549d4ad4e257ec0b576b27c6306c14ea667553f0442ea734510e7e",
             "previous_sha256": [
+                "2ee5379db44835c02cebf2c2f1929dd253fa243837e45d2795af457e7d9de1c1",
                 "0dc4393dac9b4b990193454f1dfb8008a8c1b8fccfdaacb9f1ef3f05c9effbe2",
                 "f0d96bea122927eec1c34a649f2adb6cdd79076d1e8b33978b71eb91a4ddf4e5",
                 "2284d564320bb7fbf1aa1eee5545286188429886334b1917216e350ea16e683f",
@@ -481,5 +482,6 @@
             "preserve_executable": false,
             "notes": "What the e2e-runner runs: specs under src/modules/*/tests/E2E. Created when missing; a project that edited it keeps its own."
         }
-    ]
+    ],
+    "retired": []
 }
