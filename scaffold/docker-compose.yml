@@ -62,6 +62,12 @@ services:
       # the old code (measured 2026-11-21). At 0 every include checks the file,
       # which a long-lived worker does once per class. Short CLI commands do not
       # get OPcache: a cache that lives for one command only costs its setup.
+      # file_update_protection is 0 for the same reason: at the default 2 s a
+      # file newer than the request's start is compiled but never cached, and
+      # for a CLI process the start is the master's, so every file a package
+      # update changed would sit privately in each reloaded worker until the
+      # master restarts. Updates replace files whole (composer, git), so a
+      # half-written file is not the risk the default guards against here.
       # PHP_OPCACHE=0 turns it off.
       # Sized so the whole framework fits; `opcache_get_status()` in a worker
       # must show cache_full false.
@@ -69,6 +75,8 @@ services:
       - opcache.enable_cli=${PHP_OPCACHE:-1}
       - -d
       - opcache.revalidate_freq=0
+      - -d
+      - opcache.file_update_protection=0
       - -d
       - opcache.memory_consumption=${PHP_OPCACHE_MEMORY:-256}
       - -d
