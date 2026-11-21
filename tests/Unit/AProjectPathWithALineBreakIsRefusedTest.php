@@ -83,8 +83,52 @@ final class AProjectPathWithALineBreakIsRefusedTest extends TestCase
         }
     }
 
+    /**
+     * The link's own directory is read whole too (review semitexa-ultimate#180): a script
+     * reached through a relative link in '/work/link<LF>' resolved from '/work/link', and
+     * so from a sibling project's bin/ the link never named.
+     */
+    #[Test]
+    public function a_script_reached_through_a_link_in_a_directory_ending_in_a_line_break_is_refused(): void
+    {
+        $linkDir = $this->tmp . "/link\n";
+        $this->install($linkDir . '/proj');
+        mkdir($this->tmp . '/link/proj/bin', 0o777, true);
+        self::assertTrue(symlink('proj/bin/semitexa', $linkDir . '/semitexa'));
+
+        [$exit, $out, $err] = $this->launch($linkDir . '/semitexa');
+
+        self::assertSame(1, $exit, 'it went on in: ' . $out);
+        self::assertSame('', $out);
+        self::assertStringContainsString("[ERROR] The project's path contains a line break: '" . $linkDir . "/proj'", $err);
+    }
+
+    /** A link, absolute or relative, from an ordinary directory still finds the project it names. */
+    #[Test]
+    public function a_script_reached_through_an_ordinary_link_finds_its_project(): void
+    {
+        $this->install($this->tmp . '/shop');
+        mkdir($this->tmp . '/tools');
+        self::assertTrue(symlink($this->tmp . '/shop/bin/semitexa', $this->tmp . '/tools/absolute'));
+        self::assertTrue(symlink('../shop/bin/semitexa', $this->tmp . '/tools/relative'));
+        self::assertTrue(symlink('relative', $this->tmp . '/tools/chained'));
+
+        foreach (['absolute', 'relative', 'chained'] as $link) {
+            [$exit, $out, $err] = $this->launch($this->tmp . '/tools/' . $link);
+
+            self::assertSame(0, $exit, $link . ': ' . $err);
+            self::assertSame('ROOT=[' . $this->tmp . '/shop]', $out, $link);
+        }
+    }
+
     /** @return array{int, string, string} exit code, stdout, stderr */
     private function runIn(string $project): array
+    {
+        return $this->launch($this->install($project));
+    }
+
+    /** The script's opening, up to where it has entered the project, as the project's bin/semitexa. */
+    private function install(string $project): string
     {
         $script = (string) file_get_contents(self::SCRIPT);
         $end = strpos($script, self::OPENING_ENDS);
@@ -95,7 +139,13 @@ final class AProjectPathWithALineBreakIsRefusedTest extends TestCase
         mkdir($project . '/bin', 0o777, true);
         file_put_contents($project . '/bin/semitexa', $opening . "printf 'ROOT=[%s]' \"\$PROJECT_ROOT\"\n");
 
-        $process = proc_open(['sh', $project . '/bin/semitexa'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->tmp);
+        return $project . '/bin/semitexa';
+    }
+
+    /** @return array{int, string, string} exit code, stdout, stderr */
+    private function launch(string $script): array
+    {
+        $process = proc_open(['sh', $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->tmp);
         self::assertIsResource($process);
         $out = (string) stream_get_contents($pipes[1]);
         $err = (string) stream_get_contents($pipes[2]);
