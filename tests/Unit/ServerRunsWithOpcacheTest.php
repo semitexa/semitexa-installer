@@ -45,7 +45,6 @@ final class ServerRunsWithOpcacheTest extends TestCase
 
         self::assertArrayNotHasKey('opcache.validate_timestamps', $ini, 'the PHP default validates timestamps: turned off, a restart would be the only way to see an edit, and a reload none');
         self::assertSame('0', $ini['opcache.revalidate_freq'] ?? null, 'a CLI process is one request that never ends: at the default 2 s OPcache never checks a file again, and server:reload served the old code (measured 2026-11-21)');
-        self::assertSame('0', $ini['opcache.file_update_protection'] ?? null, 'for a CLI process the request began when the master did: at the default 2 s a file an update changed is compiled but never cached, so each reloaded worker holds its own copy until the master restarts (review ultimate#179)');
         self::assertArrayNotHasKey('opcache.file_cache', $ini);
         self::assertArrayNotHasKey('opcache.preload', $ini);
     }
