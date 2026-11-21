@@ -34,16 +34,35 @@ final class AppImageBuildNoticeTest extends TestCase
         exec('rm -rf ' . escapeshellarg($this->root));
     }
 
-    /** Docker as the script sees it: Compose names the image, `image ls` answers with its id or nothing. */
-    private static function docker(string $imageLs, string $config = "printf 'demo-app\\n'"): string
-    {
+    private const MODEL = "printf 'name: demo\\nservices:\\n  app:\\n    build:\\n      context: /srv/demo\\n  setup:\\n    build:\\n      context: /srv/demo\\nnetworks:\\n  app:\\n    image: not-a-service\\n'";
+
+    /**
+     * Docker as the script sees it. Compose lists the images of app and of what it depends on, the
+     * dependency first; `image ls` answers $imageLs for the app image and $others for every other
+     * name: by default setup's image exists, and so does an app image under some other tag.
+     */
+    private static function docker(
+        string $imageLs,
+        string $listed = "printf 'demo-setup\\ndemo-app\\n'",
+        string $model = self::MODEL,
+        string $app = 'demo-app:latest',
+        string $others = "printf 'ffff00000000\\n'",
+    ): string {
         return <<<SH
             run_compose() {
                 echo 'compose: a warning of its own' >&2
-                case "\$*" in 'config --images app') {$config} ;; *) echo "UNEXPECTED run_compose \$*"; return 1 ;; esac
+                case "\$*" in
+                    'config --images app') {$listed} ;;
+                    'config app') {$model} ;;
+                    *) echo "UNEXPECTED run_compose \$*"; return 1 ;;
+                esac
             }
             docker() {
-                case "\$*" in 'image ls -q demo-app') {$imageLs} ;; *) echo "UNEXPECTED docker \$*"; return 1 ;; esac
+                case "\$*" in
+                    'image ls -q {$app}') {$imageLs} ;;
+                    'image ls -q '*) {$others} ;;
+                    *) echo "UNEXPECTED docker \$*"; return 1 ;;
+                esac
             }
             info()    { printf '[INFO] %s\\n' "\$*"; }
             success() { printf '[OK] %s\\n' "\$*"; }
@@ -118,12 +137,59 @@ final class AppImageBuildNoticeTest extends TestCase
             'the daemon does not answer' => self::docker('return 1'),
             'a Compose without config --images' => self::docker(':', "echo 'unknown flag: --images' >&2; return 1"),
             'Compose names no image' => self::docker(':', ':'),
+            'Compose names its images another way' => self::docker(':', "printf 'demo_setup\\ndemo_app\\n'"),
+            'the model cannot be read' => self::docker(':', model: 'return 1'),
         ];
-        self::assertCount(3, $cases);
+        self::assertCount(5, $cases);
         foreach ($cases as $case => $docker) {
             $out = $this->serverStart($docker);
             self::assertStringContainsString('BUILD (up -d --build)', $out, $case);
             self::assertStringNotContainsString('minutes', $out, $case);
+        }
+    }
+
+    /** The state app_image_state returns: 0 built, 1 to build, 2 cannot tell. */
+    private function state(string $docker): string
+    {
+        return $this->sh($docker, ['app_image_state'], "\napp_image_state; printf '%s' \"\$?\"");
+    }
+
+    #[Test]
+    public function a_dependencys_image_does_not_stand_for_the_apps(): void
+    {
+        // review, installer#124: `config --images app` lists setup's image too, in no fixed order.
+        $present = "printf 'a1b2c3d4e5f6\\n'";
+        foreach (["printf 'demo-setup\\ndemo-app\\n'", "printf 'demo-app\\ndemo-setup\\n'"] as $listed) {
+            self::assertSame('1', $this->state(self::docker(':', $listed)), 'setup built, app not: ' . $listed);
+            self::assertSame('0', $this->state(self::docker($present, $listed, others: ':')), 'app built, setup not: ' . $listed);
+        }
+        self::assertCount(1, self::linesFrom($this->serverStart(self::docker(':')), self::NOTICE));
+    }
+
+    #[Test]
+    public function an_app_image_under_another_tag_is_not_the_one_compose_builds(): void
+    {
+        // review, installer#124: `image ls demo-app` lists every tag, and Compose builds demo-app:latest.
+        self::assertSame('1', $this->state(self::docker(':')), 'only demo-app:old exists');
+        self::assertCount(1, self::linesFrom($this->serverStart(self::docker(':')), self::NOTICE));
+    }
+
+    #[Test]
+    public function an_image_named_in_the_compose_file_is_looked_up_as_named(): void
+    {
+        $present = "printf 'a1b2c3d4e5f6\\n'";
+        $model = static fn (string $image): string => "printf 'name: demo\\nservices:\\n  setup:\\n    image: demo-setup\\n  app:\\n    image: {$image}\\n'";
+        $cases = [
+            'registry.example/team/app:1.2' => 'registry.example/team/app:1.2',
+            'localhost:5000/team/app' => 'localhost:5000/team/app:latest',
+            'team/app@sha256:0123abcd' => 'team/app@sha256:0123abcd',
+            '"quoted/app"' => 'quoted/app:latest',
+        ];
+        self::assertCount(4, $cases);
+        foreach ($cases as $image => $lookedUp) {
+            $listed = "printf 'demo-setup\\n" . trim($image, '"') . "\\n'";
+            self::assertSame('0', $this->state(self::docker($present, $listed, $model($image), $lookedUp, ':')), $image . ' built');
+            self::assertSame('1', $this->state(self::docker(':', $listed, $model($image), $lookedUp)), $image . ' not built');
         }
     }
 
