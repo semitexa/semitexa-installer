@@ -55,9 +55,9 @@ final class ARouterRenderThatFailsIsSaidTest extends TestCase
         ] as $name) {
             $functions .= self::function($name) . "\n";
         }
-        // The two renders and what puts a rendered file in place. As a region:
+        // The renders and what puts a rendered file in place. As a region:
         // their here-documents hold a "}" at the start of a line.
-        $functions .= self::region('router_generate_nginx_config() {', 'router_generate_compose() {') . "\n";
+        $functions .= self::region('router_generate_nginx_config() {', 'router_render() {') . "\n";
 
         file_put_contents($this->tmp . '/router.sh', 'T=' . escapeshellarg($this->tmp) . "\n"
             . 'ROUTER_ROOT="$T/router"; ROUTER_COMPOSE="$ROUTER_ROOT/docker-compose.yml"; ROUTER_REGISTRY_DIR="$ROUTER_ROOT/registry/domains"' . "\n"
@@ -146,6 +146,29 @@ final class ARouterRenderThatFailsIsSaidTest extends TestCase
 
         // The same registration when the render works.
         self::assertSame(['entry shop.test -> 9502', 'compose restart proxy', 'routes follow'], $this->shell($registration));
+    }
+
+    /** The compose file is rendered as the others: cut short, the one before stays and the router is not started from it. */
+    #[Test]
+    public function a_compose_render_cut_short_keeps_the_file_before_and_the_router_is_not_started(): void
+    {
+        $said = "WARN Could not write the shared router's compose file " . $this->tmp . '/router/docker-compose.yml: the router keeps the one it had '
+            . 'and is not started or restarted. Free space there or make it writable, then run this again.';
+        $start = 'router_mode_get() { echo hosts; }; router_check_before_rebind() { :; }' . "\n"
+            . 'router_ensure_loopback_network() { :; }; router_reconnect_all() { :; }' . "\n"
+            . 'if ! router_start_for_mode; then echo "not started"; fi';
+
+        self::assertSame(
+            [$said, 'status=1'],
+            $this->shell(self::CAT_ON_A_FULL_DISK . 'router_generate_compose; echo "status=$?"'),
+        );
+        self::assertSame("services: {}\n", $this->read('docker-compose.yml'));
+        // The render of all three stops there, and so does a start.
+        self::assertSame([$said, 'rendered=1'], $this->shell(self::CAT_ON_A_FULL_DISK . 'router_render; echo "rendered=$?"'));
+        self::assertSame([$said, 'not started'], $this->shell(self::CAT_ON_A_FULL_DISK . $start));
+        self::assertSame("services: {}\n", $this->read('docker-compose.yml'));
+        $this->assertTheConfigBeforeIsIntact();
+        self::assertSame(['dns', 'docker-compose.yml', 'nginx', 'registry'], $this->names(''), 'nothing left beside the compose file');
     }
 
     /** server:start asks in a test, where set -e does not stop on a failed render. */

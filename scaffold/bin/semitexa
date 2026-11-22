@@ -2077,7 +2077,10 @@ EOF
 
 router_generate_compose() {
     router_ensure_dirs
-    cat > "$ROUTER_COMPOSE" <<EOF
+    # Beside the file first, as router_generate_nginx_config does: a compose
+    # file cut short is one the router no longer starts from.
+    _rc_new="$ROUTER_COMPOSE.new.$$"
+    if cat 2>/dev/null > "$_rc_new" <<EOF && router_install_rendered "$_rc_new" "$ROUTER_COMPOSE"; then
 services:
   dns:
     image: alpine:3.21
@@ -2122,11 +2125,16 @@ networks:
     name: router_default
     external: true
 EOF
+        return 0
+    fi
+    rm -f "$_rc_new" 2>/dev/null || :
+    warn "Could not write the shared router's compose file $ROUTER_COMPOSE: the router keeps the one it had and is not started or restarted. Free space there or make it writable, then run this again."
+    return 1
 }
 
 router_render() {
-    router_generate_compose
     # Each says what it could not write; a caller stops on the status.
+    router_generate_compose || return 1
     router_generate_nginx_config || return 1
     router_generate_dns_config || return 1
 }
