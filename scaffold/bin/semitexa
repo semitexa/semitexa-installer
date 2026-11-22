@@ -1439,10 +1439,16 @@ router_apply_app_port_to_domains() {
     if [ -n "$_apply_cpn_set" ]; then COMPOSE_PROJECT_NAME="$_apply_cpn"; else unset COMPOSE_PROJECT_NAME; fi
 
     if [ "$_changed" -eq 1 ]; then
-        router_generate_nginx_config
-        router_generate_dns_config
-        if [ -f "$ROUTER_COMPOSE" ]; then
-            router_compose restart proxy >/dev/null 2>&1 || true
+        # A render that failed says so and leaves the config before: the proxy
+        # is not restarted onto it, and the registration hears that the routes
+        # did not follow the port (tk-router-render-failures-are-silent).
+        if router_generate_nginx_config; then
+            router_generate_dns_config || _apply_failed="$_apply_failed (dns)"
+            if [ -f "$ROUTER_COMPOSE" ]; then
+                router_compose restart proxy >/dev/null 2>&1 || true
+            fi
+        else
+            _apply_failed="$_apply_failed (nginx)"
         fi
     fi
     [ -z "$_apply_failed" ]
@@ -1750,8 +1756,9 @@ router_attach_project() {
         warn "The shared router could not join network $_ra_net, so its domains go through the host port $(env_val SWOOLE_PORT 8080), published on $_ra_bind. The router reaches that port only when SWOOLE_BIND=0.0.0.0 in .env; open http://$_ra_direct:$(env_val SWOOLE_PORT 8080) meanwhile."
         # The container route an earlier attach wrote no longer resolves: write the
         # host-port route the warning names, or the domain stays a 502 (review, ultimate#145).
-        router_generate_nginx_config
-        router_reload_proxy
+        # Not reloaded when the render failed: it said so, and the router
+        # keeps the config it had.
+        if router_generate_nginx_config; then router_reload_proxy; fi
         return 0
     fi
     _ra_port="$(env_val SWOOLE_PORT 8080)"
@@ -1775,8 +1782,7 @@ router_attach_project() {
         router_registry_write_entry "$_ra_domain" "${_ra_hport:-$_ra_port}" "$_ra_mode" "$_ra_name" "$_ra_net" "$_ra_port" || :
     done
     PROJECT_ROOT="$_ra_root"
-    router_generate_nginx_config
-    router_reload_proxy
+    if router_generate_nginx_config; then router_reload_proxy; fi
 }
 
 # Takes the router off this project's networks, so `down` can remove them
@@ -1926,7 +1932,12 @@ router_generate_nginx_config() {
     # compose call after this would run in another project (Fable review,
     # installer#82).
     _saved_cpn_set="${COMPOSE_PROJECT_NAME+x}" _saved_cpn="${COMPOSE_PROJECT_NAME:-}"
-    cat > "$ROUTER_NGINX_DEFAULT" <<'EOF'
+    # Rendered beside each file and put in place only when all of it was
+    # written: a render that stopped half way (a full disk) left the router a
+    # cut config, and the caller went on as if it were whole
+    # (tk-router-render-failures-are-silent).
+    _rn_default="$ROUTER_NGINX_DEFAULT.new.$$" _rn_domains="$ROUTER_NGINX_DOMAINS.new.$$" _rn_ok=1
+    cat 2>/dev/null > "$_rn_default" <<'EOF' || _rn_ok=0
 server {
     listen 80 default_server;
     server_name _;
@@ -1939,7 +1950,7 @@ server {
 }
 EOF
 
-    : > "$ROUTER_NGINX_DOMAINS"
+    { printf '' > "$_rn_domains"; } 2>/dev/null || _rn_ok=0
     _router_nets="$(router_proxy_networks)"
     for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
         [ -f "$_entry" ] || continue
@@ -1974,7 +1985,7 @@ EOF
         set \$semitexa_upstream $UPSTREAM_CONTAINER;
         proxy_pass http://\$semitexa_upstream:$UPSTREAM_CONTAINER_PORT;"
         fi
-        cat >> "$ROUTER_NGINX_DOMAINS" <<EOF
+        cat 2>/dev/null >> "$_rn_domains" <<EOF || _rn_ok=0
 server {
     listen 80;
     server_name $DOMAIN;
@@ -1992,6 +2003,37 @@ EOF
     done
     PROJECT_ROOT="$_saved_project_root"
     if [ -n "$_saved_cpn_set" ]; then COMPOSE_PROJECT_NAME="$_saved_cpn"; else unset COMPOSE_PROJECT_NAME; fi
+    if [ "$_rn_ok" -eq 1 ] && router_install_rendered "$_rn_default" "$ROUTER_NGINX_DEFAULT" \
+        && router_install_rendered "$_rn_domains" "$ROUTER_NGINX_DOMAINS"; then
+        return 0
+    fi
+    rm -f "$_rn_default" "$_rn_domains" 2>/dev/null || :
+    warn "Could not write the shared router's nginx config in $ROUTER_NGINX_DIR: the router keeps the config it had, without what was registered or moved since. Free space there or make it writable, then run this again."
+    return 1
+}
+
+# Puts a rendered file ($1) in place of the one the router reads ($2). Written
+# over it, never moved onto it: the router's containers mount each file by
+# itself, and such a mount keeps the file it was given, so one moved in is not
+# seen until the container starts again (an nginx reload would load the config
+# before). What the file held is kept beside it for the write and put back
+# when the write fails.
+router_install_rendered() {
+    _rir_new="$1" _rir_target="$2" _rir_was=''
+    if [ -f "$_rir_target" ]; then
+        _rir_was="$_rir_target.was.$$"
+        if ! cat "$_rir_target" 2>/dev/null > "$_rir_was"; then
+            rm -f "$_rir_new" "$_rir_was" 2>/dev/null || :
+            return 1
+        fi
+    fi
+    if cat "$_rir_new" 2>/dev/null > "$_rir_target"; then
+        rm -f "$_rir_new" ${_rir_was:+"$_rir_was"} 2>/dev/null || :
+        return 0
+    fi
+    [ -z "$_rir_was" ] || cat "$_rir_was" 2>/dev/null > "$_rir_target" || :
+    rm -f "$_rir_new" ${_rir_was:+"$_rir_was"} 2>/dev/null || :
+    return 1
 }
 
 router_generate_dns_config() {
@@ -2001,7 +2043,9 @@ router_generate_dns_config() {
     # to its own project's, and router_compose after the render runs with
     # whatever is left (review, installer#111).
     _saved_cpn_set="${COMPOSE_PROJECT_NAME+x}" _saved_cpn="${COMPOSE_PROJECT_NAME:-}"
-    cat > "$ROUTER_DNSMASQ_CONF" <<'EOF'
+    # Beside each file first, as router_generate_nginx_config does.
+    _rd_conf="$ROUTER_DNSMASQ_CONF.new.$$" _rd_domains="$ROUTER_DNS_DOMAINS.new.$$" _rd_ok=1
+    cat 2>/dev/null > "$_rd_conf" <<'EOF' || _rd_ok=0
 port=53
 no-resolv
 no-daemon
@@ -2009,7 +2053,7 @@ log-queries
 conf-file=/etc/dnsmasq.d/domains.conf
 EOF
 
-    : > "$ROUTER_DNS_DOMAINS"
+    { printf '' > "$_rd_domains"; } 2>/dev/null || _rd_ok=0
     for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
         [ -f "$_entry" ] || continue
         DOMAIN='' MODE='' UPSTREAM_HOST='' UPSTREAM_PORT=''
@@ -2018,10 +2062,17 @@ EOF
         [ -n "$UPSTREAM_PORT" ] || continue
         # Only a route nginx takes (router_generate_nginx_config).
         router_route_admit || continue
-        printf 'address=/%s/127.0.0.1\n' "$DOMAIN" >> "$ROUTER_DNS_DOMAINS"
+        { printf 'address=/%s/127.0.0.1\n' "$DOMAIN" >> "$_rd_domains"; } 2>/dev/null || _rd_ok=0
     done
     PROJECT_ROOT="$_saved_project_root"
     if [ -n "$_saved_cpn_set" ]; then COMPOSE_PROJECT_NAME="$_saved_cpn"; else unset COMPOSE_PROJECT_NAME; fi
+    if [ "$_rd_ok" -eq 1 ] && router_install_rendered "$_rd_conf" "$ROUTER_DNSMASQ_CONF" \
+        && router_install_rendered "$_rd_domains" "$ROUTER_DNS_DOMAINS"; then
+        return 0
+    fi
+    rm -f "$_rd_conf" "$_rd_domains" 2>/dev/null || :
+    warn "Could not write the shared router's DNS config in $ROUTER_DNS_DIR: the router keeps the config it had, without what was registered or removed since. Free space there or make it writable, then run this again."
+    return 1
 }
 
 router_generate_compose() {
@@ -2075,8 +2126,9 @@ EOF
 
 router_render() {
     router_generate_compose
-    router_generate_nginx_config
-    router_generate_dns_config
+    # Each says what it could not write; a caller stops on the status.
+    router_generate_nginx_config || return 1
+    router_generate_dns_config || return 1
 }
 
 router_compose() {
@@ -2347,18 +2399,20 @@ router_check_before_rebind() {
 router_start_for_mode() {
     _mode="$(router_mode_get)"
     router_check_before_rebind
-    router_render
+    # Said by the render; server:start calls this in a test, where set -e
+    # does not stop on it.
+    router_render || return 1
     router_ensure_loopback_network
     case "$_mode" in
         dns)
             router_apply_name_resolution
             router_compose up -d dns proxy
-            router_reconnect_all; router_generate_nginx_config
+            router_reconnect_all; router_generate_nginx_config || return 1
             router_compose restart dns proxy >/dev/null 2>&1 || true
             ;;
         hosts)
             router_compose up -d proxy
-            router_reconnect_all; router_generate_nginx_config
+            router_reconnect_all; router_generate_nginx_config || return 1
             router_compose stop dns >/dev/null 2>&1 || true
             router_compose restart proxy >/dev/null 2>&1 || true
             ;;
