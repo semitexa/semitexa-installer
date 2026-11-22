@@ -90,6 +90,8 @@ final class ARouterRenderThatFailsIsSaidTest extends TestCase
         self::assertStringContainsString('listen 80 default_server;', $this->read('nginx/generated/default.conf'));
         self::assertStringContainsString('conf-file=/etc/dnsmasq.d/domains.conf', $this->read('dns/generated/dnsmasq.conf'));
         self::assertSame("address=/shop.test/127.0.0.1\n", $this->read('dns/generated/domains.conf'));
+        // Asked of the file again, not of what PHP remembers of the first look.
+        clearstatcache();
         self::assertSame($inode, fileinode($this->tmp . '/router/nginx/generated/domains.conf'), 'written over, not moved onto');
         $this->assertNothingIsLeftBeside();
     }
@@ -128,6 +130,82 @@ final class ARouterRenderThatFailsIsSaidTest extends TestCase
         self::assertSame([sprintf(self::NGINX_SAID, $this->tmp), 'status=1'], $out);
         self::assertSame("# the routes before\n", $this->read('nginx/generated/domains.conf'));
         $this->assertNothingIsLeftBeside();
+    }
+
+    /**
+     * Review, installer#131: the write over the file failed and so did putting
+     * back what it held. The file is then cut short and the copy is the only
+     * whole one: it stays, the warning names it, and nothing says the config
+     * before was kept.
+     */
+    #[Test]
+    public function a_file_that_could_not_be_put_back_leaves_its_contents_beside_it_and_says_where(): void
+    {
+        $out = $this->shell(
+            'cat() { case "${1:-}" in *domains.conf.new.*|*domains.conf.was.*) printf "server { cut"; return 1 ;; esac; command cat "$@"; }' . "\n"
+            . 'router_generate_nginx_config; echo "status=$?"; echo "pid=$$"',
+        );
+        $pid = substr($out[2] ?? '', 4);
+        $target = $this->tmp . '/router/nginx/generated/domains.conf';
+
+        self::assertSame([
+            'WARN Could not write ' . $target . ', and could not put back what it held: the file is cut short, and its contents from before are kept in '
+            . $target . '.was.' . $pid . '. Free space there or make it writable, copy that file over it, then run this again.',
+            'status=1',
+            'pid=' . $pid,
+        ], $out);
+        self::assertSame(['default.conf', 'domains.conf', 'domains.conf.was.' . $pid], $this->names('nginx/generated'));
+        self::assertSame("# the routes before\n", $this->read('nginx/generated/domains.conf.was.' . $pid));
+        self::assertSame('server { cut', $this->read('nginx/generated/domains.conf'));
+    }
+
+    /**
+     * Review, installer#131: the port is in the entry since a registration
+     * whose render failed, so the next one changes no entry. It rendered
+     * nothing then and reported routes that still went to the port before.
+     */
+    #[Test]
+    public function a_registration_after_a_failed_render_renders_what_the_entries_hold(): void
+    {
+        // The writer, as far as the port: the entry holds it from here on.
+        $registration = 'router_registry_write_entry() {' . "\n"
+            . '    echo "entry $1 -> $2"; _e="$ROUTER_REGISTRY_DIR/$1.env"' . "\n"
+            . '    sed "s/^UPSTREAM_PORT=.*/UPSTREAM_PORT=$2/" "$_e" > "$_e.tmp" && mv "$_e.tmp" "$_e"' . "\n"
+            . '}' . "\n"
+            . 'if router_apply_app_port_to_domains /home/dev/shop 9502; then echo "routes follow"; else echo "routes did not follow"; fi';
+
+        self::assertSame(
+            ['entry shop.test -> 9502', sprintf(self::NGINX_SAID, $this->tmp), 'routes did not follow'],
+            $this->shell(self::CAT_ON_A_FULL_DISK . $registration),
+        );
+        // Again while it still fails: no entry to change, and it still says so.
+        self::assertSame([sprintf(self::NGINX_SAID, $this->tmp), 'routes did not follow'], $this->shell(self::CAT_ON_A_FULL_DISK . $registration));
+        $this->assertTheConfigBeforeIsIntact();
+
+        // Again when the render works: the routes are written and the proxy takes them.
+        self::assertSame(['compose restart proxy', 'routes follow'], $this->shell($registration));
+        self::assertStringContainsString('proxy_pass http://host.docker.internal:9502;', $this->read('nginx/generated/domains.conf'));
+        self::assertSame("address=/shop.test/127.0.0.1\n", $this->read('dns/generated/domains.conf'));
+
+        // And once more: the config holds it already, so nothing is written and nothing restarts.
+        $inode = fileinode($this->tmp . '/router/nginx/generated/domains.conf');
+        $written = filemtime($this->tmp . '/router/nginx/generated/domains.conf');
+        self::assertSame(['routes follow'], $this->shell($registration));
+        clearstatcache();
+        self::assertSame([$inode, $written], [fileinode($this->tmp . '/router/nginx/generated/domains.conf'), filemtime($this->tmp . '/router/nginx/generated/domains.conf')]);
+        $this->assertNothingIsLeftBeside();
+    }
+
+    /** A project with no domain in the router is none of the render's business. */
+    #[Test]
+    public function a_registration_of_a_project_without_a_domain_renders_nothing(): void
+    {
+        $out = $this->shell(
+            'router_generate_nginx_config() { echo rendered; }; router_registry_write_entry() { echo wrote; }' . "\n"
+            . 'router_apply_app_port_to_domains /home/dev/other 9502; echo "status=$?"',
+        );
+
+        self::assertSame(['status=0'], $out);
     }
 
     /** The finding: the port was recorded, the render failed, and the registration heard nothing of it. */

@@ -1419,12 +1419,13 @@ router_apply_app_port_to_domains() {
     # As in router_sync_project_domains: each entry read sets
     # COMPOSE_PROJECT_NAME, and it is put back on the way out.
     _apply_cpn_set="${COMPOSE_PROJECT_NAME+x}" _apply_cpn="${COMPOSE_PROJECT_NAME:-}"
-    _changed=0 _apply_failed=''
+    _changed=0 _apply_failed='' _apply_seen=0
     for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
         [ -f "$_entry" ] || continue
         DOMAIN='' PROJECT_ROOT='' COMPOSE_PROJECT_NAME='' UPSTREAM_HOST='' UPSTREAM_PORT='' MODE='' UPDATED_AT=''
         registry_entry_load "$_entry" || continue
         [ "$PROJECT_ROOT" = "$_project_root_arg" ] || continue
+        _apply_seen=1
         [ "$UPSTREAM_PORT" != "$_new_port" ] || continue
         PROJECT_ROOT="$_project_root_arg"
         # Checked, not left to set -e: a write that failed ended a
@@ -1438,13 +1439,23 @@ router_apply_app_port_to_domains() {
     PROJECT_ROOT="$_saved_project_root"
     if [ -n "$_apply_cpn_set" ]; then COMPOSE_PROJECT_NAME="$_apply_cpn"; else unset COMPOSE_PROJECT_NAME; fi
 
-    if [ "$_changed" -eq 1 ]; then
+    # Rendered whenever this project has a domain, not only when an entry
+    # changed here: an entry may hold the port since a registration whose
+    # render failed, and this one would then report routes that still go to
+    # the port before. The render is what is compared, so nothing has to
+    # remember that it failed: a file that already holds it is left alone,
+    # and the proxy restarts only for an entry or a config that changed
+    # (review, installer#131). Not when all this run did was fail to write an
+    # entry: nothing here changed, and it reports the failure either way.
+    if [ "$_changed" -eq 1 ] || { [ "$_apply_seen" -eq 1 ] && [ -z "$_apply_failed" ]; }; then
         # A render that failed says so and leaves the config before: the proxy
         # is not restarted onto it, and the registration hears that the routes
         # did not follow the port (tk-router-render-failures-are-silent).
+        ROUTER_RENDER_CHANGED=0
         if router_generate_nginx_config; then
+            [ "$ROUTER_RENDER_CHANGED" -eq 0 ] || _changed=1
             router_generate_dns_config || _apply_failed="$_apply_failed (dns)"
-            if [ -f "$ROUTER_COMPOSE" ]; then
+            if [ "$_changed" -eq 1 ] && [ -f "$ROUTER_COMPOSE" ]; then
                 router_compose restart proxy >/dev/null 2>&1 || true
             fi
         else
@@ -2003,11 +2014,15 @@ EOF
     done
     PROJECT_ROOT="$_saved_project_root"
     if [ -n "$_saved_cpn_set" ]; then COMPOSE_PROJECT_NAME="$_saved_cpn"; else unset COMPOSE_PROJECT_NAME; fi
-    if [ "$_rn_ok" -eq 1 ] && router_install_rendered "$_rn_default" "$ROUTER_NGINX_DEFAULT" \
-        && router_install_rendered "$_rn_domains" "$ROUTER_NGINX_DOMAINS"; then
-        return 0
+    _rn_st=1
+    if [ "$_rn_ok" -eq 1 ]; then
+        _rn_st=0
+        router_install_rendered_all "$_rn_default" "$ROUTER_NGINX_DEFAULT" "$_rn_domains" "$ROUTER_NGINX_DOMAINS" || _rn_st=$?
     fi
+    [ "$_rn_st" -ne 0 ] || return 0
     rm -f "$_rn_default" "$_rn_domains" 2>/dev/null || :
+    # 2: said by the install, which could not keep the config before.
+    [ "$_rn_st" -ne 2 ] || return 1
     warn "Could not write the shared router's nginx config in $ROUTER_NGINX_DIR: the router keeps the config it had, without what was registered or moved since. Free space there or make it writable, then run this again."
     return 1
 }
@@ -2018,9 +2033,17 @@ EOF
 # seen until the container starts again (an nginx reload would load the config
 # before). What the file held is kept beside it for the write and put back
 # when the write fails.
+#   0  in place; ROUTER_RENDER_CHANGED=1 when the file now differs from before
+#   1  not written, and the file is as it was
+#   2  cut short and not put back: said here, with where its contents are kept
 router_install_rendered() {
     _rir_new="$1" _rir_target="$2" _rir_was=''
     if [ -f "$_rir_target" ]; then
+        # The same already: nothing to write, and nothing to reload for.
+        if cmp -s "$_rir_new" "$_rir_target" 2>/dev/null; then
+            rm -f "$_rir_new" 2>/dev/null || :
+            return 0
+        fi
         _rir_was="$_rir_target.was.$$"
         if ! cat "$_rir_target" 2>/dev/null > "$_rir_was"; then
             rm -f "$_rir_new" "$_rir_was" 2>/dev/null || :
@@ -2029,11 +2052,37 @@ router_install_rendered() {
     fi
     if cat "$_rir_new" 2>/dev/null > "$_rir_target"; then
         rm -f "$_rir_new" ${_rir_was:+"$_rir_was"} 2>/dev/null || :
+        ROUTER_RENDER_CHANGED=1
         return 0
     fi
-    [ -z "$_rir_was" ] || cat "$_rir_was" 2>/dev/null > "$_rir_target" || :
-    rm -f "$_rir_new" ${_rir_was:+"$_rir_was"} 2>/dev/null || :
-    return 1
+    rm -f "$_rir_new" 2>/dev/null || :
+    if [ -z "$_rir_was" ]; then
+        # There was none before: a cut one is not left as if it were whole.
+        rm -f "$_rir_target" 2>/dev/null || :
+        return 1
+    fi
+    if cat "$_rir_was" 2>/dev/null > "$_rir_target"; then
+        rm -f "$_rir_was" 2>/dev/null || :
+        return 1
+    fi
+    # The copy stays: it is now the only whole one (review, installer#131).
+    warn "Could not write $_rir_target, and could not put back what it held: the file is cut short, and its contents from before are kept in $_rir_was. Free space there or make it writable, copy that file over it, then run this again."
+    return 2
+}
+
+# Puts rendered files in place, as pairs of <rendered> <target>, and stops at
+# the first that fails: its status is returned, and the rest are dropped.
+router_install_rendered_all() {
+    _ria_st=0
+    while [ "$#" -ge 2 ]; do
+        if [ "$_ria_st" -eq 0 ]; then
+            router_install_rendered "$1" "$2" || _ria_st=$?
+        else
+            rm -f "$1" 2>/dev/null || :
+        fi
+        shift 2
+    done
+    return "$_ria_st"
 }
 
 router_generate_dns_config() {
@@ -2066,11 +2115,14 @@ EOF
     done
     PROJECT_ROOT="$_saved_project_root"
     if [ -n "$_saved_cpn_set" ]; then COMPOSE_PROJECT_NAME="$_saved_cpn"; else unset COMPOSE_PROJECT_NAME; fi
-    if [ "$_rd_ok" -eq 1 ] && router_install_rendered "$_rd_conf" "$ROUTER_DNSMASQ_CONF" \
-        && router_install_rendered "$_rd_domains" "$ROUTER_DNS_DOMAINS"; then
-        return 0
+    _rd_st=1
+    if [ "$_rd_ok" -eq 1 ]; then
+        _rd_st=0
+        router_install_rendered_all "$_rd_conf" "$ROUTER_DNSMASQ_CONF" "$_rd_domains" "$ROUTER_DNS_DOMAINS" || _rd_st=$?
     fi
+    [ "$_rd_st" -ne 0 ] || return 0
     rm -f "$_rd_conf" "$_rd_domains" 2>/dev/null || :
+    [ "$_rd_st" -ne 2 ] || return 1
     warn "Could not write the shared router's DNS config in $ROUTER_DNS_DIR: the router keeps the config it had, without what was registered or removed since. Free space there or make it writable, then run this again."
     return 1
 }
@@ -2080,7 +2132,8 @@ router_generate_compose() {
     # Beside the file first, as router_generate_nginx_config does: a compose
     # file cut short is one the router no longer starts from.
     _rc_new="$ROUTER_COMPOSE.new.$$"
-    if cat 2>/dev/null > "$_rc_new" <<EOF && router_install_rendered "$_rc_new" "$ROUTER_COMPOSE"; then
+    _rc_st=0
+    cat 2>/dev/null > "$_rc_new" <<EOF && router_install_rendered "$_rc_new" "$ROUTER_COMPOSE" || _rc_st=$?
 services:
   dns:
     image: alpine:3.21
@@ -2125,9 +2178,9 @@ networks:
     name: router_default
     external: true
 EOF
-        return 0
-    fi
+    [ "$_rc_st" -ne 0 ] || return 0
     rm -f "$_rc_new" 2>/dev/null || :
+    [ "$_rc_st" -ne 2 ] || return 1
     warn "Could not write the shared router's compose file $ROUTER_COMPOSE: the router keeps the one it had and is not started or restarted. Free space there or make it writable, then run this again."
     return 1
 }
