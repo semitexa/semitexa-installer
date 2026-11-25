@@ -397,6 +397,11 @@ final class QueueWorkerScaffoldTest extends TestCase
         }
         $sh = "env_val() {\n  case \$1 in\n{$values}    *) printf '%s' \"\${2:-}\" ;;\n  esac\n}\n" . $functions . $call;
 
-        return trim((string) shell_exec(sprintf('env -i PATH=/usr/bin:/bin PROJECT_ROOT=%s sh -c %s', escapeshellarg($this->tmp), escapeshellarg($sh))));
+        // The status as well: a call that failed and printed nothing read as
+        // "no files" (CodeRabbit on installer#134).
+        exec(sprintf('env -i PATH=/usr/bin:/bin PROJECT_ROOT=%s sh -c %s 2>&1', escapeshellarg($this->tmp), escapeshellarg($sh)), $output, $status);
+        self::assertSame(0, $status, "{$call} failed: " . implode("\n", $output));
+
+        return trim(implode("\n", $output));
     }
 }

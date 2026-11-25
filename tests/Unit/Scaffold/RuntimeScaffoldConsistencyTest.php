@@ -22,7 +22,10 @@ final class RuntimeScaffoldConsistencyTest extends TestCase
         self::assertIsString($natsOverlay);
 
         self::assertStringContainsString("\n  scheduler:\n", $baseCompose);
-        self::assertStringContainsString('build: .', $baseCompose);
+        // In the scheduler's own block: app, setup and cli build from . too,
+        // so the whole file says nothing about it (CodeRabbit on installer#134).
+        self::assertSame(1, preg_match('/\n  scheduler:\n((?:(?:    .*)?\n)*)/', $baseCompose, $scheduler), 'the scheduler block is found');
+        self::assertMatchesRegularExpression('/^    build: \.$/m', $scheduler[1], 'the scheduler builds the app image');
         self::assertStringContainsString("\n  scheduler:\n", $mysqlOverlay);
         self::assertStringContainsString("\n  scheduler:\n", $redisOverlay);
         self::assertStringContainsString("\n  scheduler:\n", $natsOverlay);
@@ -35,7 +38,8 @@ final class RuntimeScaffoldConsistencyTest extends TestCase
 
         self::assertIsString($bin);
         self::assertStringContainsString('.env.default', $bin);
-        self::assertStringContainsString('.env', $bin);
+        // .env on its own: every .env.default contains ".env" (CodeRabbit on installer#134).
+        self::assertMatchesRegularExpression('/\.env(?![.\w])/', $bin, 'the project .env is read as well');
         self::assertStringNotContainsString('.env.local', $bin);
     }
 
