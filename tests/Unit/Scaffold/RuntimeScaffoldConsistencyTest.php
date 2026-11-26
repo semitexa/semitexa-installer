@@ -42,7 +42,12 @@ final class RuntimeScaffoldConsistencyTest extends TestCase
         // Read, not mentioned: the loops that load the env files, as code
         // lines (a comment saying ".env is not read" passed the name check;
         // CodeRabbit on installer#135). .env comes last, so it overrides.
-        self::assertMatchesRegularExpression('/^\s*for _file in "\$PROJECT_ROOT\/\.env\.default" "\$PROJECT_ROOT\/\.env"; do$/m', $bin, 'the project .env is read after .env.default');
+        // In each function that reads the env files, not anywhere in the
+        // script (CodeRabbit on installer#135): the merge and the existence check.
+        foreach (['env_merged_lines', 'env_runtime_file_exists'] as $function) {
+            self::assertSame(1, preg_match('/^' . $function . '\(\) \{\n.*?^\}$/ms', $bin, $body), "{$function} must still exist in bin/semitexa");
+            self::assertMatchesRegularExpression('/^\s*for _file in "\$PROJECT_ROOT\/\.env\.default" "\$PROJECT_ROOT\/\.env"; do$/m', $body[0], "{$function} reads the project .env after .env.default");
+        }
         self::assertStringNotContainsString('.env.local', $bin);
     }
 
