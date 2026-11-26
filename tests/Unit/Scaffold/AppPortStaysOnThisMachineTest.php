@@ -46,6 +46,7 @@ final class AppPortStaysOnThisMachineTest extends TestCase
         self::assertSame(['"a:1:1"', '"b:2:2"'], self::portEntries("x:\n  ports: [\"a:1:1\", \"b:2:2\"]\n"), 'a flow list');
         self::assertSame(['"a:1:1"'], self::portEntries("x:\n  ports:  # one\n  -  \"a:1:1\"\n  volumes: []\n"), 'a comment after the key, a list at its own indent');
         self::assertSame(['"8081:80"', "'8082:80'"], self::portEntries("x:\n  \"ports\": [\"8081:80\"]\ny:\n  'ports':\n    - '8082:80'\n"), 'a quoted key (CodeRabbit on installer#134)');
+        self::assertSame(['"0.0.0.0:8081:80"'], self::portEntries("x:\n  \"ports\" : [\"0.0.0.0:8081:80\"]\n"), 'and one with a space before its colon');
     }
 
     #[Test]
@@ -70,7 +71,7 @@ final class AppPortStaysOnThisMachineTest extends TestCase
         $indent = null;
         foreach (preg_split('/\R/', $yaml) ?: [] as $line) {
             $code = rtrim((string) preg_replace('/\s+#.*$|^\s*#.*$/', '', $line));
-            if (preg_match('/^(\s*)(?:-\s+)?(["\']?)ports\2:\s*(.*)$/', $code, $m) === 1) {
+            if (preg_match('/^(\s*)(?:-\s+)?(["\']?)ports\2\s*:\s*(.*)$/', $code, $m) === 1) {
                 $indent = null;
                 $rest = trim($m[3]);
                 if ($rest === '') {

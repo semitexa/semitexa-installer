@@ -39,7 +39,8 @@ final class RuntimeScaffoldConsistencyTest extends TestCase
         self::assertIsString($bin);
         self::assertStringContainsString('.env.default', $bin);
         // .env on its own: every .env.default contains ".env" (CodeRabbit on installer#134).
-        self::assertMatchesRegularExpression('/\.env(?![.\w])/', $bin, 'the project .env is read as well');
+        // The whole name: not project.env, .env-backup or .env.default.
+        self::assertMatchesRegularExpression('/(?<![\w.-])\.env(?![\w.-])/', $bin, 'the project .env is read as well');
         self::assertStringNotContainsString('.env.local', $bin);
     }
 

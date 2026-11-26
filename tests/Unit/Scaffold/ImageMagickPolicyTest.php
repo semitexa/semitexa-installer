@@ -32,7 +32,8 @@ final class ImageMagickPolicyTest extends TestCase
         preg_match_all('/<policy\b[^>]*>/', $dockerfile, $elements);
         $rules = [];
         foreach ($elements[0] as $element) {
-            preg_match_all('/(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/', $element, $pairs, PREG_SET_ORDER);
+            // Whole names only: data-pattern is not pattern.
+            preg_match_all('/(?<=\s)([\w:-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/', $element, $pairs, PREG_SET_ORDER);
             $attributes = [];
             foreach ($pairs as $pair) {
                 $attributes[$pair[1]] = $pair[2] !== '' ? $pair[2] : ($pair[3] ?? '');
