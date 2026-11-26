@@ -1,0 +1,36 @@
+# Boot the whole stack with THIS repository's scaffold: bin/semitexa, the
+# Dockerfile, the Compose files and .env.default, as a pull request has them.
+#
+# Since step 4 of one source for bin/semitexa the installer alone ships those
+# files, and the gate that boots them, semitexa-ultimate's stack smoke, read
+# the installer's develop line: a change here was first booted after it
+# merged. This calls that gate with the installer under test (the pull
+# request's head, a fork's too), which ultimate's workflow checks out beside the
+# app and builds the app image from (semitexa-ultimate stack-smoke.yml, "Check
+# out the installer under test").
+#
+# The gate is pinned to ultimate's develop, the line it is maintained on, as
+# every caller of it is told to (its header). It needs no secret: the
+# read-only token is enough for the downloads it makes.
+name: Stack smoke
+
+on:
+  pull_request:
+  push:
+    branches: [develop, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stack-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stack:
+    uses: semitexa/semitexa-ultimate/.github/workflows/stack-smoke.yml@develop
+    with:
+      # owner/name, so a fork's pull request is booted from the fork.
+      override_repo: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+      override_ref: ${{ github.event.pull_request.head.sha || github.sha }}
