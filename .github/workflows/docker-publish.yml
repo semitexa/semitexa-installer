@@ -1,11 +1,13 @@
 name: Build & Publish Docker Image
 
+# Release tags only (dec-one-source-for-bin-semitexa, step 3c of one source
+# for bin/semitexa). A push to master also rebuilt `latest`, so the image a
+# new project got moved ahead of every release, and could finish after a
+# release's own build and replace it. The old v* tags have not been used since
+# the CalVer releases. A pull request is booted by stack-smoke.yml instead.
 on:
   push:
-    branches:
-      - master
     tags:
-      - 'v*'
       # A release cut tags every package's master with the UTC release
       # version (YYYY.MM.DD.HHMM, with -beta for a beta). The image built from
       # that tag is the one that release's install.sh writes projects with:
@@ -69,9 +71,6 @@ jobs:
         with:
           images: semitexa/installer
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
             # The release version as a raw tag: type=ref,event=tag would also set
             # `latest` on every tag under the default latest=auto flavor, beta too
             # (review, installer#120). `latest` comes only from the next line.
