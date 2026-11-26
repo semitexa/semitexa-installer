@@ -119,6 +119,73 @@ final class BuildManifestToolTest extends TestCase
         self::assertSame([str_repeat('c', 64)], $this->entry('docker-compose.redis.yml')['previous_sha256'], 'its old version stays known');
     }
 
+    public function testARolledBackFileDropsCurrentHashFromPreviousAndPassesTheCheck(): void
+    {
+        $binPath = $this->root . '/scaffold/bin/semitexa';
+        $originalBytes = (string) file_get_contents($binPath);
+        $old = $this->entry('bin/semitexa');
+        $hashA = $old['current_sha256'];
+        $priorHistory = $old['previous_sha256'];
+
+        file_put_contents($binPath, "\n# changed\n", FILE_APPEND);
+        [$status, $output] = $this->run_();
+        self::assertSame(0, $status, $output);
+        $hashB = $this->entry('bin/semitexa')['current_sha256'];
+        self::assertNotSame($hashA, $hashB);
+
+        file_put_contents($binPath, $originalBytes);
+        [$status, $output] = $this->run_();
+        self::assertSame(0, $status, $output);
+
+        $rolledBack = $this->entry('bin/semitexa');
+        self::assertSame($hashA, $rolledBack['current_sha256']);
+        $expectedHistory = array_values(array_unique(array_diff([$hashB, ...$priorHistory], [$hashA])));
+        self::assertSame($expectedHistory, $rolledBack['previous_sha256']);
+
+        exec(sprintf('%s %s --root=%s 2>&1', escapeshellarg(PHP_BINARY), escapeshellarg(self::CHECK), escapeshellarg($this->root)), $checked, $checkStatus);
+        self::assertSame(0, $checkStatus, implode("\n", $checked));
+    }
+
+    public function testARemovedScaffoldFileMovesToRetiredWithItsHashesAndPassesPreviousCheck(): void
+    {
+        $natsPath = $this->root . '/scaffold/docker-compose.nats.yml';
+        file_put_contents($natsPath, "\n# next\n", FILE_APPEND);
+        [$status, $output] = $this->run_();
+        self::assertSame(0, $status, $output);
+
+        $before = $this->entry('docker-compose.nats.yml');
+        $expectedHashes = array_values(array_unique([$before['current_sha256'], ...$before['previous_sha256']]));
+        sort($expectedHashes, SORT_STRING);
+
+        $earlierPath = $this->root . '/earlier-manifest.json';
+        copy($this->root . '/resources/scaffold-manifest.json', $earlierPath);
+
+        unlink($natsPath);
+        $policy = require $this->root . '/resources/scaffold-policy.php';
+        self::assertIsArray($policy);
+        unset($policy['docker-compose.nats.yml']);
+        file_put_contents($this->root . '/resources/scaffold-policy.php', "<?php\n\nreturn " . var_export($policy, true) . ";\n");
+
+        [$status, $output] = $this->run_();
+        self::assertSame(0, $status, $output);
+
+        $written = $this->manifest();
+        self::assertCount(18, $written['files']);
+        $retiredMatch = null;
+        foreach ($written['retired'] ?? [] as $entry) {
+            if (($entry['path'] ?? null) === 'docker-compose.nats.yml') {
+                $retiredMatch = $entry;
+                break;
+            }
+        }
+        self::assertSame(['path' => 'docker-compose.nats.yml', 'shipped_sha256' => $expectedHashes], $retiredMatch);
+
+        exec(sprintf('%s %s --root=%s --previous=%s 2>&1', escapeshellarg(PHP_BINARY), escapeshellarg(self::CHECK), escapeshellarg($this->root), escapeshellarg($earlierPath)), $checked, $checkStatus);
+        $checkOutput = implode("\n", $checked);
+        self::assertSame(0, $checkStatus, $checkOutput);
+        self::assertStringContainsString('keeps every hash of the earlier manifest', $checkOutput);
+    }
+
     /**
      * @return array{int, string}
      */

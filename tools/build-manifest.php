@@ -129,8 +129,11 @@ foreach ($paths as $path) {
     if ($before !== null) {
         $known = array_values(array_filter(is_array($before['previous_sha256'] ?? null) ? $before['previous_sha256'] : [], 'is_string'));
         $was = is_string($before['current_sha256'] ?? null) ? $before['current_sha256'] : '';
-        $previous = $was === $current ? $known : array_values(array_unique([$was, ...$known]));
-        $previous = array_values(array_filter($previous, static fn (string $hash): bool => $hash !== ''));
+        $previous = $was === $current ? $known : [$was, ...$known];
+        $previous = array_values(array_unique(array_filter(
+            $previous,
+            static fn (string $hash): bool => $hash !== '' && $hash !== $current,
+        )));
     }
     // A retired path shipped again: the versions it shipped with before stay
     // known, so an untouched old copy is replaced, not reported as edited.
@@ -150,12 +153,32 @@ foreach ($paths as $path) {
     ];
 }
 
-// Carried over as it is; a path the scaffold ships again is managed again.
+// Carried over as it is, plus any previously active path removed from
+// scaffold/ so its shipped hashes are preserved under retired; a path
+// shipped again is managed again under files.
+foreach (array_diff(array_keys($priorEntries), $paths) as $removedPath) {
+    $removedEntry = $priorEntries[$removedPath];
+    $removedKnown = is_array($removedEntry['previous_sha256'] ?? null) ? $removedEntry['previous_sha256'] : [];
+    $removedHashes = array_values(array_filter(
+        [$removedEntry['current_sha256'] ?? null, ...$removedKnown, ...($priorRetired[$removedPath] ?? [])],
+        static fn (mixed $hash): bool => is_string($hash) && $hash !== '',
+    ));
+    if ($removedHashes !== []) {
+        $priorRetired[$removedPath] = array_values(array_unique($removedHashes));
+    }
+}
+
 $retired = [];
 $retiredPaths = array_values(array_diff(array_keys($priorRetired), $paths));
 sort($retiredPaths, SORT_STRING);
 foreach ($retiredPaths as $path) {
-    $hashes = $priorRetired[$path];
+    $hashes = array_values(array_unique(array_filter(
+        $priorRetired[$path],
+        static fn (string $hash): bool => $hash !== '',
+    )));
+    if ($hashes === []) {
+        continue;
+    }
     sort($hashes, SORT_STRING);
     $retired[] = ['path' => $path, 'shipped_sha256' => $hashes];
 }
