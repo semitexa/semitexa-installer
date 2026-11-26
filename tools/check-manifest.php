@@ -102,6 +102,8 @@ if (!is_string($manifest['generated_at'] ?? null) || $manifest['generated_at'] =
 
 /** @var array<string, list<string>> $known path => every hash known for it (current first) */
 $known = [];
+/** @var array<string, array<mixed>> $entries path => its entry */
+$entries = [];
 $files = $manifest['files'] ?? null;
 if (!is_array($files) || !array_is_list($files)) {
     $findings[] = 'files is not a list.';
@@ -157,6 +159,7 @@ foreach ($files as $index => $entry) {
         $findings[] = "{$path}: notes is not a string.";
     }
     $known[$path] = [$current, ...$valid];
+    $entries[$path] = $entry;
 }
 
 // Retired: files the scaffold shipped and no longer does. update deletes a
@@ -224,6 +227,37 @@ foreach (array_keys($known) as $path) {
     if (!isset($onDisk[$path])) {
         $findings[] = "{$path}: listed in the manifest with no file in scaffold/.";
     }
+}
+
+// Every file has a policy row, and each entry carries it as it is (step 2.5 of
+// one source for bin/semitexa: tools/build-manifest.php writes the manifest
+// from resources/scaffold-policy.php, so an entry that differs was edited by
+// hand or built from another policy).
+$policyPath = $root . '/resources/scaffold-policy.php';
+$policy = is_file($policyPath) ? require $policyPath : null;
+if (!is_array($policy)) {
+    $cannotRead("Cannot read the scaffold policy: {$policyPath}");
+}
+foreach (array_keys($onDisk) as $path) {
+    $row = $policy[$path] ?? null;
+    if (!is_array($row)) {
+        $findings[] = "{$path}: in scaffold/ with no row in resources/scaffold-policy.php, so its category and flags are nobody's decision.";
+        continue;
+    }
+    if (!in_array($row['category'] ?? null, CATEGORIES, true)) {
+        $findings[] = sprintf('%s: the policy\'s category %s is not one semitexa/update knows (%s).', $path, $show($row['category'] ?? null), implode(', ', CATEGORIES));
+    }
+    if (!isset($entries[$path])) {
+        continue;
+    }
+    foreach (['category', ...FLAGS, 'notes'] as $field) {
+        if (($entries[$path][$field] ?? null) !== ($row[$field] ?? null)) {
+            $findings[] = sprintf('%s: %s is %s, the policy says %s. Rebuild the manifest: php tools/build-manifest.php', $path, $field, $show($entries[$path][$field] ?? null), $show($row[$field] ?? null));
+        }
+    }
+}
+foreach (array_keys(array_diff_key($policy, $onDisk)) as $path) {
+    $findings[] = "{$path}: a policy row for a file scaffold/ does not have.";
 }
 
 // Nothing the earlier manifest knew is forgotten: neither a file it listed nor

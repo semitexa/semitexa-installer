@@ -32,6 +32,7 @@ final class CheckManifestToolTest extends TestCase
         $package = \dirname(__DIR__, 2);
         mkdir($this->root . '/resources', 0755, true);
         copy($package . '/resources/scaffold-manifest.json', $this->root . '/resources/scaffold-manifest.json');
+        copy($package . '/resources/scaffold-policy.php', $this->root . '/resources/scaffold-policy.php');
         $this->copyTree($package . '/scaffold', $this->root . '/scaffold');
     }
 
@@ -117,6 +118,39 @@ final class CheckManifestToolTest extends TestCase
             static function (string $root): void { self::edit($root, static function (array $m): array { $m['files'][0]['path'] = '../outside'; return $m; }); },
             'not a safe relative path: "../outside"',
         ];
+        // Step 2.5 of one source for bin/semitexa: the policy decides each entry.
+        yield 'a scaffold file with no policy row' => [
+            static function (string $root): void { self::editPolicy($root, static function (array $p): array { unset($p['Dockerfile']); return $p; }); },
+            'Dockerfile: in scaffold/ with no row in resources/scaffold-policy.php',
+        ];
+        yield 'an entry whose flag differs from its policy row' => [
+            static function (string $root): void { self::editEntry($root, 'bin/semitexa', static function (array $e): array { $e['auto_update'] = false; return $e; }); },
+            'bin/semitexa: auto_update is false, the policy says true',
+        ];
+        yield 'an entry whose notes differ from its policy row' => [
+            static function (string $root): void { self::editEntry($root, 'Dockerfile', static function (array $e): array { $e['notes'] = 'edited by hand'; return $e; }); },
+            'Dockerfile: notes is "edited by hand", the policy says',
+        ];
+        yield 'a policy row for a file the scaffold does not have' => [
+            static function (string $root): void { self::editPolicy($root, static function (array $p): array { $p['docker-compose.gone.yml'] = $p['Dockerfile']; return $p; }); },
+            'docker-compose.gone.yml: a policy row for a file scaffold/ does not have',
+        ];
+        yield 'a policy category no released reader knows' => [
+            static function (string $root): void { self::editPolicy($root, static function (array $p): array { $p['Dockerfile']['category'] = 'container'; return $p; }); },
+            'Dockerfile: the policy\'s category "container" is not one semitexa/update knows',
+        ];
+    }
+
+    /**
+     * @param \Closure(array<string, array<string, mixed>>): array<string, array<string, mixed>> $change
+     */
+    private static function editPolicy(string $root, \Closure $change): void
+    {
+        $path = $root . '/resources/scaffold-policy.php';
+        $policy = require $path;
+        self::assertIsArray($policy);
+        /** @var array<string, array<string, mixed>> $policy */
+        file_put_contents($path, "<?php\n\nreturn " . var_export($change($policy), true) . ";\n");
     }
 
     public function testAHashTheEarlierManifestKnewMustStillBeKnown(): void
@@ -164,6 +198,8 @@ final class CheckManifestToolTest extends TestCase
         }
         self::assertNotSame([], $shipped, 'docker-compose.nats.yml is not in the manifest: the case would retire nothing.');
         unlink($this->root . '/scaffold/docker-compose.nats.yml');
+        // Its policy row goes with it: a row for a file the scaffold lacks is a finding.
+        self::editPolicy($this->root, static function (array $p): array { unset($p['docker-compose.nats.yml']); return $p; });
         /**
          * @param list<string> $hashes
          * @return \Closure(Manifest): array<mixed>
