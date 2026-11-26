@@ -89,6 +89,10 @@ final class TestRunOneSpecTest extends TestCase
         self::assertCount(2, $parts, $filters);
         self::assertSame(1, preg_match('~' . $parts[0] . '~i', '/var/www/html/src/m/tests/E2E/user[1].spec.ts'), $parts[0]);
         self::assertSame(0, preg_match('~' . $parts[0] . '~i', '/var/www/html/src/m/tests/E2E/user1.spec.ts'), 'brackets are literal');
+        // The second filter is the second spec's: two copies of the first passed
+        // every exclusion below (CodeRabbit on installer#134).
+        self::assertSame(1, preg_match('~' . $parts[1] . '~i', '/var/www/html/src/m/tests/E2E/b.spec.ts'), $parts[1]);
+        self::assertSame(0, preg_match('~' . $parts[1] . '~i', '/var/www/html/src/m/tests/E2E/user[1].spec.ts'), 'and only it');
         self::assertSame(0, preg_match('~' . $parts[1] . '~i', '/var/www/html/src/m/tests/E2E/b.spec.ts.bak'), 'anchored at the end');
         self::assertSame(0, preg_match('~' . $parts[1] . '~i', '/var/www/html/src/m/tests/E2E/xb.spec.ts'), 'anchored at a path segment');
         self::assertSame(0, preg_match('~' . $parts[1] . '~i', '/var/www/html/packages/x/src/m/tests/E2E/b.spec.ts'), 'anchored at the project root: the same path deeper is another spec');

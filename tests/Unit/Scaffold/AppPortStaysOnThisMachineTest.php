@@ -22,8 +22,13 @@ final class AppPortStaysOnThisMachineTest extends TestCase
     public function every_published_port_is_bound_to_swoole_bind_on_loopback_by_default(): void
     {
         $published = [];
-        foreach (glob(self::ROOT . '/docker-compose*.yml') ?: [] as $file) {
-            foreach (self::portEntries((string) file_get_contents($file)) as $entry) {
+        $files = glob(self::ROOT . '/docker-compose*.yml') ?: [];
+        self::assertNotSame([], $files, 'the scaffold ships Compose files');
+        foreach ($files as $file) {
+            $yaml = @file_get_contents($file);
+            // An overlay that cannot be read publishes nothing it could be checked for.
+            self::assertIsString($yaml, "{$file} cannot be read");
+            foreach (self::portEntries($yaml) as $entry) {
                 $published[basename($file)][] = $entry;
             }
         }
@@ -40,6 +45,8 @@ final class AppPortStaysOnThisMachineTest extends TestCase
         self::assertSame(['"${SWOOLE_BIND:-127.0.0.1}:9502:9502"', '9503:9503', 'target: 80 published: 8081'], self::portEntries($yaml));
         self::assertSame(['"a:1:1"', '"b:2:2"'], self::portEntries("x:\n  ports: [\"a:1:1\", \"b:2:2\"]\n"), 'a flow list');
         self::assertSame(['"a:1:1"'], self::portEntries("x:\n  ports:  # one\n  -  \"a:1:1\"\n  volumes: []\n"), 'a comment after the key, a list at its own indent');
+        self::assertSame(['"8081:80"', "'8082:80'"], self::portEntries("x:\n  \"ports\": [\"8081:80\"]\ny:\n  'ports':\n    - '8082:80'\n"), 'a quoted key (CodeRabbit on installer#134)');
+        self::assertSame(['"0.0.0.0:8081:80"'], self::portEntries("x:\n  \"ports\" : [\"0.0.0.0:8081:80\"]\n"), 'and one with a space before its colon');
     }
 
     #[Test]
@@ -64,9 +71,9 @@ final class AppPortStaysOnThisMachineTest extends TestCase
         $indent = null;
         foreach (preg_split('/\R/', $yaml) ?: [] as $line) {
             $code = rtrim((string) preg_replace('/\s+#.*$|^\s*#.*$/', '', $line));
-            if (preg_match('/^(\s*)(?:-\s+)?ports:\s*(.*)$/', $code, $m) === 1) {
+            if (preg_match('/^(\s*)(?:-\s+)?(["\']?)ports\2\s*:\s*(.*)$/', $code, $m) === 1) {
                 $indent = null;
-                $rest = trim($m[2]);
+                $rest = trim($m[3]);
                 if ($rest === '') {
                     $indent = strlen($m[1]);
                 } elseif (preg_match('/^\[(.*)\]$/', $rest, $flow) === 1) {

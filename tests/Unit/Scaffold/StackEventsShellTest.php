@@ -46,6 +46,9 @@ final class StackEventsShellTest extends TestCase
         self::assertStringNotContainsString('"', $first['detail']);
         // Sanitised, not emptied: the words around the dropped quote survive.
         self::assertStringStartsWith('app; rm -rf /', $first['detail']);
+        // The key itself: a line without it read as null too (CodeRabbit on installer#134).
+        self::assertIsArray($second);
+        self::assertArrayHasKey('by', $second);
         self::assertNull($second['by'], 'a session value that is not an id is recorded as nobody');
     }
 
@@ -149,7 +152,10 @@ final class StackEventsShellTest extends TestCase
         $first = $identity('CLAUDE_CODE_SESSION_ID=dac88658-d35d-4cde-8520-5f4a1db5be9f');
         self::assertMatchesRegularExpression('/^claude-[0-9a-f]{6}\|claude$/', $first);
         self::assertSame($first, $identity('CLAUDE_CODE_SESSION_ID=dac88658-d35d-4cde-8520-5f4a1db5be9f'));
-        self::assertNotSame($first, $identity('CLAUDE_CODE_SESSION_ID=another-session'));
+        // A real second identity, not a missing one ("|" differs from any id too).
+        $second = $identity('CLAUDE_CODE_SESSION_ID=another-session');
+        self::assertMatchesRegularExpression('/^claude-[0-9a-f]{6}\|claude$/', $second);
+        self::assertNotSame($first, $second);
         self::assertSame('codex-abc123|', $identity('SEMITEXA_AGENT_SESSION=codex-abc123 CLAUDE_CODE_SESSION_ID=x'), 'an explicit export wins');
         self::assertSame('|0', $identity('SEMITEXA_AGENT_IMPLICIT=0 CLAUDE_CODE_SESSION_ID=x'), 'and the agent can turn derivation off');
     }

@@ -367,6 +367,7 @@ final class ARegistryEntryIsReadAsDataTest extends TestCase
         self::assertSame(0, self::sourcings($script), 'an entry is read with registry_entry_load, never sourced');
         // The gate sees a sourcing wherever a command starts, not only at a line's start (review, ultimate#165).
         self::assertSame(4, self::sourcings(". \"\$_entry\"\nload \"\$x\"; . \"\$_entry\"\nif true; then source \$f; fi\n[ -f \"\$e\" ] && . \"\$e\"\n"), 'the gate catches each sourcing');
+        self::assertSame(4, self::sourcings("if . \"\$_entry\"; then :; fi\nwhile source \$f; do :; done\n( . \"\$e\" )\n! . \"\$e\"\n"), 'and a sourcing in a condition, a subshell or after !');
         self::assertGreaterThanOrEqual(17, substr_count($script, 'registry_entry_load "'), 'every reader that sourced an entry reads it with the loader');
     }
 
@@ -413,7 +414,10 @@ final class ARegistryEntryIsReadAsDataTest extends TestCase
     /** How many times $script sources a file named by a variable, at any place a command starts. */
     private static function sourcings(string $script): int
     {
-        $count = preg_match_all('/(?:^|[;&|]|\b(?:then|do|else))\s*(?:\.|source)\s+["$]/m', $script);
+        // A command position: a line start, after ; & | ( { or !, or after a
+        // keyword that starts a command (if/elif/while/until take a command
+        // as their condition: CodeRabbit on installer#134).
+        $count = preg_match_all('/(?:^|[;&|({!]|\b(?:then|do|else|if|elif|while|until))\s*(?:\.|source)\s+["$]/m', $script);
         self::assertIsInt($count, 'the pattern compiles');
 
         return $count;

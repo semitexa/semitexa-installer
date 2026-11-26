@@ -20,16 +20,32 @@ final class ImageMagickPolicyTest extends TestCase
     #[Test]
     public function every_raster_format_media_handles_has_its_coders_allowed(): void
     {
-        $dockerfile = (string) file_get_contents(dirname(__DIR__, 3) . '/scaffold' . '/Dockerfile');
+        $dockerfile = @file_get_contents(dirname(__DIR__, 3) . '/scaffold' . '/Dockerfile');
+        self::assertIsString($dockerfile, 'the scaffold Dockerfile cannot be read');
 
         // Every coder rule, in order: ImageMagick applies the last one that
         // matches, so a second read|write rule appended after these would open
         // every coder while a check for "one allow-list exists" still passed.
-        preg_match_all('/<policy domain="coder"[^>]*>/', $dockerfile, $rules);
+        // Read by attribute, whatever their order or quotes (CodeRabbit on
+        // installer#134): a rule written as <policy pattern="*" domain='coder'>
+        // counts as much as one in the usual order.
+        preg_match_all('/<policy\b[^>]*>/', $dockerfile, $elements);
+        $rules = [];
+        foreach ($elements[0] as $element) {
+            // Whole names only: data-pattern is not pattern.
+            preg_match_all('/(?<=\s)([\w:-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/', $element, $pairs, PREG_SET_ORDER);
+            $attributes = [];
+            foreach ($pairs as $pair) {
+                $attributes[$pair[1]] = $pair[2] !== '' ? $pair[2] : ($pair[3] ?? '');
+            }
+            if (($attributes['domain'] ?? null) === 'coder') {
+                $rules[] = [$attributes['rights'] ?? null, $attributes['pattern'] ?? null];
+            }
+        }
 
         self::assertSame([
-            '<policy domain="coder" rights="none" pattern="*"/>',
-            '<policy domain="coder" rights="read|write" pattern="{JPEG,JPG,PNG,WEBP,GIF,HEIC,HEIF,AVIF,BMP,BMP2,BMP3}"/>',
-        ], $rules[0]);
+            ['none', '*'],
+            ['read|write', '{JPEG,JPG,PNG,WEBP,GIF,HEIC,HEIF,AVIF,BMP,BMP2,BMP3}'],
+        ], $rules);
     }
 }
